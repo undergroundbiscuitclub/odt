@@ -1,0 +1,14 @@
+.venv
+.venv2
+__pycache__
+debug_sample_v2.png
+otd.tar.gz
+
+# Local transfer folders & temporary artifacts
+received/
+test_received*
+test_tmp/
+*.bin
+
+# Automated test suite
+tests/
