@@ -2,6 +2,9 @@
 
 **otd** (Optical Data Transfer) is an optical data transfer suite designed to transmit files across isolated networks, locked-down RDP/VDI sessions, and air-gapped environments. It transforms arbitrary binary files into high-density animated visual 2D color data grids on a screen, and reconstructs the original files from video recordings or real-time screen captures.
 
+<img width="1510" height="823" alt="Screenshot From 2026-09-18 09-33-56" src="https://github.com/user-attachments/assets/852cfcac-b2d8-4f0c-92e5-cff194fe426e" />
+
+
 ---
 
 ## Features
