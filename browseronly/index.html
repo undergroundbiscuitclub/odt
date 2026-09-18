@@ -1,0 +1,2066 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>OTD - Air-Gap Duplex Server & In-Browser Optical Engine</title>
+  <style>
+    :root {
+      --bg-dark: #090d16;
+      --bg-card: #0f172a;
+      --bg-card-sub: #1e293b;
+      --border: #334155;
+      --border-color: #334155;
+      --text-main: #f8fafc;
+      --text-dim: #94a3b8;
+      --accent-cyan: #06b6d4;
+      --accent-green: #10b981;
+      --accent-purple: #a855f7;
+      --accent-red: #ef4444;
+      --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background: var(--bg-dark);
+      color: var(--text-main);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+
+    header {
+      background: rgba(15, 23, 42, 0.95);
+      backdrop-filter: blur(8px);
+      border-bottom: 1px solid var(--border);
+      padding: 0.65rem 1.5rem;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      position: sticky;
+      top: 0;
+      z-index: 50;
+      flex-wrap: wrap;
+      gap: 0.75rem;
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+      font-size: 1.1rem;
+      font-weight: 800;
+      letter-spacing: -0.5px;
+    }
+    .brand-icon {
+      width: 28px;
+      height: 28px;
+      background: linear-gradient(135deg, var(--accent-cyan), #3b82f6);
+      border-radius: 6px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 900;
+      font-size: 0.85rem;
+      color: #fff;
+    }
+    .badge-pure {
+      font-size: 0.68rem;
+      font-weight: 700;
+      padding: 0.2rem 0.5rem;
+      border-radius: 4px;
+      background: rgba(6, 182, 212, 0.15);
+      color: var(--accent-cyan);
+      border: 1px solid rgba(6, 182, 212, 0.3);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+
+    /* Navigation Tabs */
+    .nav-tabs {
+      display: flex;
+      gap: 0.4rem;
+      background: #090d16;
+      padding: 0.25rem;
+      border-radius: 8px;
+      border: 1px solid var(--border);
+    }
+    .nav-tab {
+      background: transparent;
+      border: none;
+      color: var(--text-dim);
+      padding: 0.45rem 1rem;
+      border-radius: 6px;
+      font-size: 0.82rem;
+      font-weight: 700;
+      cursor: pointer;
+      transition: all 0.15s ease;
+      display: flex;
+      align-items: center;
+      gap: 0.4rem;
+    }
+    .nav-tab:hover { color: var(--text-main); }
+    .nav-tab.active {
+      background: var(--bg-card-sub);
+      color: #fff;
+      border: 1px solid var(--accent-cyan);
+      box-shadow: 0 1px 4px rgba(0,0,0,0.3);
+    }
+
+    .header-actions {
+      display: flex;
+      align-items: center;
+      gap: 0.6rem;
+      flex-wrap: wrap;
+    }
+
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.4rem;
+      padding: 0.3rem 0.75rem;
+      border-radius: 9999px;
+      font-size: 0.75rem;
+      font-weight: 700;
+      font-family: var(--font-mono);
+      letter-spacing: 0.3px;
+    }
+    .pill-gray { background: #1e293b; color: #94a3b8; border: 1px solid #334155; }
+    .pill-green { background: rgba(16, 185, 129, 0.15); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.4); }
+    .pill-yellow { background: rgba(245, 158, 11, 0.15); color: #fbbf24; border: 1px solid rgba(245, 158, 11, 0.4); }
+    .pill-cyan { background: rgba(6, 182, 212, 0.15); color: #38bdf8; border: 1px solid rgba(6, 182, 212, 0.4); }
+
+    .btn-danger {
+      background: #dc2626;
+      color: white;
+      border: none;
+      padding: 0.4rem 0.85rem;
+      border-radius: 6px;
+      font-weight: 700;
+      font-size: 0.8rem;
+      cursor: pointer;
+      transition: background 0.15s;
+      display: inline-flex;
+      align-items: center;
+      gap: 0.35rem;
+    }
+    .btn-danger:hover { background: #b91c1c; }
+
+    main {
+      flex: 1;
+      padding: 1.25rem;
+      display: grid;
+      grid-template-columns: 1.15fr 1fr;
+      gap: 1.25rem;
+      max-width: 1700px;
+      margin: 0 auto;
+      width: 100%;
+    }
+
+    @media (max-width: 1100px) {
+      main { grid-template-columns: 1fr; }
+    }
+
+    .card {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 1rem;
+      display: flex;
+      flex-direction: column;
+      gap: 1rem;
+      box-shadow: 0 4px 20px rgba(0, 0, 0, 0.25);
+    }
+
+    /* Video Viewport Stage */
+    .viewport-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 0.5rem;
+    }
+    .viewport-title {
+      font-size: 0.92rem;
+      font-weight: 700;
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+
+    .video-toolbar {
+      display: flex;
+      gap: 0.4rem;
+      align-items: center;
+      flex-wrap: wrap;
+    }
+
+    .btn {
+      background: var(--bg-card-sub);
+      color: #fff;
+      border: 1px solid var(--border);
+      padding: 0.4rem 0.8rem;
+      border-radius: 6px;
+      font-size: 0.8rem;
+      font-weight: 600;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 0.35rem;
+      transition: all 0.15s ease;
+    }
+    .btn:hover { background: #334155; }
+    .btn-primary {
+      background: var(--accent-cyan);
+      border-color: var(--accent-cyan);
+      color: #090d16;
+      font-weight: 700;
+    }
+    .btn-primary:hover { background: #0891b2; color: #fff; }
+
+    .video-stage {
+      position: relative;
+      width: 100%;
+      height: 420px;
+      background: #000;
+      border-radius: 8px;
+      overflow: hidden;
+      border: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .video-stage.draw-mode { cursor: crosshair; }
+
+    #videoEl {
+      width: 100%;
+      height: 100%;
+      object-fit: contain;
+      display: block;
+    }
+    #overlayCanvas {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      pointer-events: auto;
+    }
+
+    .stage-placeholder {
+      position: absolute;
+      color: var(--text-dim);
+      font-size: 0.9rem;
+      text-align: center;
+      pointer-events: none;
+      line-height: 1.5;
+    }
+
+    /* Tab Panes */
+    .tab-pane { display: none; flex-direction: column; gap: 1rem; }
+    .tab-pane.active { display: flex; }
+
+    /* Dropzone */
+    .dropzone {
+      border: 2px dashed #334155;
+      border-radius: 8px;
+      padding: 1.5rem;
+      text-align: center;
+      cursor: pointer;
+      transition: border-color 0.2s, background 0.2s;
+      background: #080d1a;
+    }
+    .dropzone:hover, .dropzone.dragover {
+      border-color: var(--accent-cyan);
+      background: #0d1527;
+    }
+    .dropzone-text { font-size: 0.88rem; color: var(--text-dim); }
+    .dropzone-browse { color: var(--accent-cyan); font-weight: 700; }
+
+    /* Speed Preset Selector */
+    .preset-group { display: flex; gap: 0.4rem; }
+    .preset-btn {
+      flex: 1;
+      background: #090d16;
+      border: 1px solid var(--border);
+      color: var(--text-dim);
+      padding: 0.5rem 0.2rem;
+      border-radius: 6px;
+      font-size: 0.78rem;
+      font-weight: 700;
+      cursor: pointer;
+      text-align: center;
+      transition: all 0.15s ease;
+    }
+    .preset-btn:hover { color: #fff; border-color: #475569; }
+    .preset-btn.active {
+      background: #1e293b;
+      border-color: var(--accent-cyan);
+      color: #38bdf8;
+    }
+
+    /* Status Banner */
+    .status-banner {
+      padding: 0.75rem 1rem;
+      border-radius: 8px;
+      font-size: 0.85rem;
+      font-weight: 600;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 0.5rem;
+    }
+    .banner-wait { background: rgba(245, 158, 11, 0.15); border: 1px solid rgba(245, 158, 11, 0.3); color: #fbbf24; }
+    .banner-active { background: rgba(6, 182, 212, 0.15); border: 1px solid rgba(6, 182, 212, 0.3); color: #38bdf8; }
+    .banner-success { background: rgba(16, 185, 129, 0.15); border: 1px solid rgba(16, 185, 129, 0.3); color: #34d399; }
+    .banner-error { background: rgba(239, 68, 68, 0.15); border: 1px solid rgba(239, 68, 68, 0.3); color: #f87171; }
+
+    /* Progress & Metrics */
+    .progress-wrap { display: flex; flex-direction: column; gap: 0.35rem; }
+    .progress-header {
+      display: flex;
+      justify-content: space-between;
+      font-size: 0.78rem;
+      font-family: var(--font-mono);
+      font-weight: 600;
+    }
+    .progress-track {
+      width: 100%;
+      height: 9px;
+      background: var(--bg-card-sub);
+      border-radius: 9999px;
+      overflow: hidden;
+      border: 1px solid var(--border);
+    }
+    .progress-bar {
+      height: 100%;
+      width: 0%;
+      background: linear-gradient(90deg, var(--accent-cyan), var(--accent-green));
+      border-radius: 9999px;
+      transition: width 0.15s ease-out;
+    }
+
+    .metrics-grid {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 0.5rem;
+    }
+    @media (max-width: 600px) {
+      .metrics-grid { grid-template-columns: repeat(2, 1fr); }
+    }
+    .metric-box {
+      background: var(--bg-card-sub);
+      border: 1px solid rgba(51, 65, 85, 0.6);
+      border-radius: 8px;
+      padding: 0.6rem 0.75rem;
+      display: flex;
+      flex-direction: column;
+      gap: 0.2rem;
+      text-align: center;
+    }
+    .metric-title { font-size: 0.68rem; color: var(--text-dim); font-weight: 600; text-transform: uppercase; }
+    .metric-value { font-size: 1.05rem; font-weight: 800; font-family: var(--font-mono); color: #fff; }
+
+    /* Chunk Matrix */
+    .matrix-box {
+      max-height: 120px;
+      overflow-y: auto;
+      background: #060911;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 0.5rem;
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(9px, 1fr));
+      gap: 2px;
+    }
+    .matrix-cell {
+      height: 9px;
+      background: #1e293b;
+      border-radius: 1px;
+      transition: background 0.1s;
+    }
+    .matrix-cell.data, .matrix-cell.acked { background: var(--accent-green); box-shadow: 0 0 3px rgba(16, 185, 129, 0.4); }
+    .matrix-cell.parity { background: var(--accent-purple); box-shadow: 0 0 3px rgba(168, 85, 247, 0.4); }
+    .matrix-cell.active { background: var(--accent-cyan); box-shadow: 0 0 4px rgba(6, 182, 212, 0.5); }
+
+    /* Dewarped Live Feed Panel */
+    .dewarp-panel {
+      display: flex;
+      align-items: center;
+      gap: 1rem;
+      background: #0a0e17;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 0.75rem;
+    }
+    #dewarpCanvas {
+      width: 110px;
+      height: 110px;
+      background: #000;
+      border: 1px solid var(--accent-cyan);
+      border-radius: 4px;
+      image-rendering: pixelated;
+    }
+    .dewarp-info {
+      flex: 1;
+      font-size: 0.8rem;
+      color: var(--text-dim);
+      display: flex;
+      flex-direction: column;
+      gap: 0.35rem;
+    }
+    .dewarp-info b { color: var(--text-main); }
+
+    /* Chat / Terminal Command Row */
+    .chat-row { display: flex; gap: 0.4rem; }
+    .chat-input {
+      flex: 1;
+      background: #060911;
+      border: 1px solid var(--border);
+      color: #fff;
+      padding: 0.45rem 0.75rem;
+      border-radius: 6px;
+      font-size: 0.82rem;
+      font-family: var(--font-mono);
+    }
+    .chat-input:focus { outline: none; border-color: var(--accent-cyan); }
+
+    /* Log Box */
+    .log-box {
+      background: #060911;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      height: 120px;
+      overflow-y: auto;
+      padding: 0.5rem;
+      font-family: var(--font-mono);
+      font-size: 0.75rem;
+      color: #94a3b8;
+      display: flex;
+      flex-direction: column;
+      gap: 0.2rem;
+    }
+    .log-entry { line-height: 1.4; }
+
+    /* Tables */
+    .file-table { width: 100%; border-collapse: collapse; font-size: 0.82rem; }
+    .file-table th { text-align: left; padding: 0.5rem 0.75rem; color: var(--text-dim); border-bottom: 1px solid var(--border); }
+    .file-table td { padding: 0.6rem 0.75rem; border-bottom: 1px solid #1a2234; }
+    .file-table tr:hover { background: #0c1220; }
+
+    /* Completion Modal */
+    .modal-overlay {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(0, 0, 0, 0.75);
+      backdrop-filter: blur(5px);
+      z-index: 100;
+      align-items: center;
+      justify-content: center;
+      padding: 1rem;
+    }
+    .modal-box {
+      background: var(--bg-card);
+      border: 2px solid var(--accent-green);
+      box-shadow: 0 0 30px rgba(16, 185, 129, 0.25);
+      border-radius: 12px;
+      max-width: 540px;
+      width: 100%;
+      padding: 1.5rem;
+      display: flex;
+      flex-direction: column;
+      gap: 1.25rem;
+    }
+    .modal-header {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+    }
+    .check-circle {
+      width: 38px;
+      height: 38px;
+      border-radius: 50%;
+      background: rgba(16, 185, 129, 0.15);
+      border: 2px solid var(--accent-green);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 1.25rem;
+      color: var(--accent-green);
+    }
+    .result-row {
+      display: flex;
+      justify-content: space-between;
+      font-size: 0.85rem;
+      border-bottom: 1px solid #1e293b;
+      padding: 0.35rem 0;
+      font-family: var(--font-mono);
+    }
+    .result-row span { color: var(--text-dim); }
+    .result-row b { color: #fff; word-break: break-all; }
+
+    /* Broadcast Mode Container */
+    .broadcast-container {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 0.75rem;
+      background: #000;
+      padding: 1rem;
+      border-radius: 8px;
+      border: 1px solid var(--border);
+    }
+    #broadcastCanvas {
+      width: 320px;
+      height: 320px;
+      background: #000;
+      image-rendering: pixelated;
+      border: 1px solid var(--accent-cyan);
+      border-radius: 4px;
+    }
+  </style>
+</head>
+<body>
+
+<header>
+  <div class="brand">
+    <div class="brand-icon">⚡</div>
+    <div>
+      <span>OTD Air-Gap Duplex</span>
+      <span class="badge-pure">Browser Vision Engine</span>
+    </div>
+  </div>
+
+  <div class="nav-tabs">
+    <button class="nav-tab active" id="tabBtnSend" onclick="switchTab('send')">📤 Send to Remote</button>
+    <button class="nav-tab" id="tabBtnReceive" onclick="switchTab('receive')">📥 Receive from Remote</button>
+    <button class="nav-tab" id="tabBtnFiles" onclick="switchTab('files')">📁 File Library (<span id="filesCountBadge">0</span>)</button>
+  </div>
+
+  <div class="header-actions">
+    <div id="linkPill" class="pill pill-gray">○ SEARCHING</div>
+    <div id="typerPill" class="pill pill-gray">● TYPER: ...</div>
+    <button class="btn-danger" onclick="emergencyStop()">🛑 Emergency Stop</button>
+  </div>
+</header>
+
+<main>
+  <!-- Left Column: Shared Optical Video Viewport -->
+  <div class="card">
+    <div class="viewport-header">
+      <div class="viewport-title">
+        <span>📺 Optical Feedback & Camera Stream</span>
+        <span id="fpsBadge" class="pill pill-cyan">0.0 FPS</span>
+      </div>
+
+      <div class="video-toolbar">
+        <button id="btnShareScreen" class="btn btn-primary" onclick="toggleScreenShare()">📺 Share Screen</button>
+        <button id="btnToggleCamera" class="btn" onclick="toggleCamera()">📷 Use Camera</button>
+        <select id="cameraSelect" class="btn" style="display:none; padding: 0.35rem 0.6rem; font-size: 0.78rem; background: var(--bg-card-sub); color: var(--text-main); border: 1px solid var(--border);" onchange="onCameraDeviceChanged(this.value)">
+          <option value="">Default Camera</option>
+        </select>
+        <label id="lblMirrorCamera" title="Horizontally flip camera view (for front-facing webcams)" style="display:none; align-items:center; gap:0.35rem; font-size:0.8rem; color:var(--text-main); cursor:pointer; padding:0 0.3rem;">
+          <input type="checkbox" id="chkMirrorCamera" onchange="onMirrorToggled()">
+          <span>Flip</span>
+        </label>
+        <button id="btnAutoSnap" class="btn" onclick="autoSnapMask()" title="Snap mask tightly to detected corner fiducials">🎯 Auto-Snap</button>
+        <label title="Automatically lock mask when optical signal is recognized" style="display:inline-flex; align-items:center; gap:0.35rem; font-size:0.8rem; color:var(--text-main); cursor:pointer; padding:0 0.3rem;">
+          <input type="checkbox" id="chkAutoSnap" checked>
+          <span>Auto-Lock</span>
+        </label>
+        <button id="btnDrawMask" class="btn" onclick="toggleDrawMask()">✏ Draw Mask</button>
+        <button id="btnClearMask" class="btn" onclick="clearMask()">🔄 Clear</button>
+      </div>
+    </div>
+
+    <div id="videoStage" class="video-stage">
+      <video id="videoEl" autoplay playsinline muted></video>
+      <canvas id="overlayCanvas"></canvas>
+      <div id="stagePlaceholder" class="stage-placeholder">
+        Click <b>Share Screen</b> or <b>Use Camera</b> to lock optical feed.<br>
+        Tracks optical codes & client feedback at 60 FPS in browser with &lt;1ms latency!
+      </div>
+    </div>
+
+    <div style="display: flex; justify-content: space-between; font-size: 0.78rem; color: var(--text-dim); font-family: var(--font-mono);">
+      <span id="maskStatus">Full Video (No Mask)</span>
+      <span id="fidsStatus">Fiducials: 0/4</span>
+      <span id="engineStatus">Engine: Pure JS / WebGL</span>
+    </div>
+  </div>
+
+  <!-- Right Column: Tabbed Workflow Panels -->
+  <div class="card">
+
+    <!-- ========================================================================= -->
+    <!-- TAB 1: SEND TO REMOTE -->
+    <!-- ========================================================================= -->
+    <div id="paneSend" class="tab-pane active">
+      <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.5rem;">
+        <h3 style="font-size: 0.95rem;">📤 Transmit File to Remote Client</h3>
+        <div style="display: flex; gap: 0.4rem; align-items: center;">
+          <button class="btn" id="btnRequestKeyboard" style="padding: 0.25rem 0.6rem; font-size: 0.75rem;" onclick="requestKeyboardAccess()">🔑 Keyboard Access</button>
+          <button class="btn" id="btnToggleBroadcast" style="padding: 0.25rem 0.6rem; font-size: 0.75rem;" onclick="toggleSendMode()">📺 Screen Broadcast</button>
+        </div>
+      </div>
+
+      <!-- Send Sub-mode: Keyboard Typer (Default like server_v2) -->
+      <div id="sendTyperSection" style="display: flex; flex-direction: column; gap: 1rem;">
+        <!-- File Dropzone -->
+        <div class="dropzone" id="dropzone" onclick="document.getElementById('fileInput').click()">
+          <input type="file" id="fileInput" style="display:none;" onchange="handleFileSelect(this.files)">
+          <div style="font-size: 1.5rem; margin-bottom: 0.4rem;">📄</div>
+          <div class="dropzone-text">Drag & drop any file here, or <span class="dropzone-browse">browse</span></div>
+          <div id="stagedFileDesc" style="font-size: 0.78rem; color: #38bdf8; margin-top: 0.4rem; font-weight: 600;">No file staged</div>
+        </div>
+
+        <!-- Speed Presets -->
+        <div>
+          <div style="font-size: 0.72rem; color: var(--text-dim); margin-bottom: 0.3rem; font-weight: 700;">TRANSMISSION SPEED PRESET:</div>
+          <div class="preset-group">
+            <button class="preset-btn" id="btnSpeedTurbo" onclick="setSpeed('turbo')">⚡ TURBO<br><span style="font-size:0.65rem;font-weight:normal;">256B / 0ms</span></button>
+            <button class="preset-btn active" id="btnSpeedFast" onclick="setSpeed('fast')">🚀 FAST<br><span style="font-size:0.65rem;font-weight:normal;">256B / 0.2ms</span></button>
+            <button class="preset-btn" id="btnSpeedBalanced" onclick="setSpeed('balanced')">⚖ BALANCED<br><span style="font-size:0.65rem;font-weight:normal;">192B / 1ms</span></button>
+            <button class="preset-btn" id="btnSpeedSafe" onclick="setSpeed('safe')">🛡️ SAFE<br><span style="font-size:0.65rem;font-weight:normal;">128B / 2ms</span></button>
+          </div>
+        </div>
+
+        <!-- Client Focus Status Banner -->
+        <div id="clientStatusBanner" class="status-banner banner-wait">
+          <span id="clientStatusText">Waiting for Client Window Focus (Press ENTER or SPACE in client)...</span>
+          <span id="clientFocusSeq" class="pill pill-yellow">SEQ 0</span>
+        </div>
+
+        <!-- Progress Bar & Stats -->
+        <div class="progress-wrap">
+          <div class="progress-header">
+            <span id="sendProgressLabel">Progress: 0.0%</span>
+            <span id="sendSpeedLabel">0.0 KB/s</span>
+          </div>
+          <div class="progress-track">
+            <div id="sendProgressFill" class="progress-bar"></div>
+          </div>
+        </div>
+
+        <div class="metrics-grid">
+          <div class="metric-box">
+            <div class="metric-title">Chunks Acked</div>
+            <div id="statSendChunks" class="metric-value">0 / 0</div>
+          </div>
+          <div class="metric-box">
+            <div class="metric-title">Speed (KB/s)</div>
+            <div id="statSendSpeed" class="metric-value">0.0</div>
+          </div>
+          <div class="metric-box">
+            <div class="metric-title">Retries</div>
+            <div id="statSendRetries" class="metric-value">0</div>
+          </div>
+          <div class="metric-box">
+            <div class="metric-title">Link State</div>
+            <div id="statSendState" class="metric-value">IDLE</div>
+          </div>
+        </div>
+
+        <!-- Send Chunk Matrix -->
+        <div>
+          <div style="font-size: 0.72rem; color: var(--text-dim); margin-bottom: 0.3rem; font-weight: 700;">TRANSMISSION CHUNK MATRIX:</div>
+          <div id="sendChunkMatrix" class="matrix-box"></div>
+        </div>
+
+        <!-- Quick Terminal Chat / Command Injection -->
+        <div>
+          <div style="font-size: 0.72rem; color: var(--text-dim); margin-bottom: 0.3rem; font-weight: 700;">QUICK TERMINAL COMMAND / CHAT INJECTION:</div>
+          <div class="chat-row">
+            <input type="text" id="chatInput" class="chat-input" placeholder="Type text or bash command to type into remote client..." onkeydown="if(event.key==='Enter') sendChat()">
+            <button class="btn btn-primary" onclick="sendChat()">Send</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Send Sub-mode: Visual Screen Broadcast (Optional pure optical display) -->
+      <div id="sendBroadcastSection" style="display: none; flex-direction: column; gap: 1rem;">
+        <div class="broadcast-container">
+          <canvas id="broadcastCanvas" width="400" height="400"></canvas>
+          <div style="display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; justify-content: center;">
+            <button id="btnBroadcastPlay" class="btn btn-primary" onclick="toggleBroadcastPlay()">▶ Start Visual Broadcast</button>
+            <button class="btn" onclick="toggleFullscreenBroadcast()">⛶ Fullscreen</button>
+            <label style="font-size: 0.8rem; color: var(--text-dim); display: flex; align-items: center; gap: 0.3rem;">
+              <span>FPS:</span>
+              <input type="range" id="broadcastFps" min="10" max="60" value="30" oninput="updateBroadcastFps(this.value)" style="width: 80px;">
+              <span id="broadcastFpsLabel">30</span>
+            </label>
+          </div>
+          <div id="broadcastInfo" style="font-family: var(--font-mono); font-size: 0.75rem; color: var(--accent-cyan);">Ready to broadcast staged file optically</div>
+        </div>
+      </div>
+
+      <!-- Send Log Console -->
+      <div class="log-box" id="sendConsole">
+        <div class="log-entry">[Ready] Duplex Sender initialized. Share remote terminal window and stage a file to begin.</div>
+      </div>
+    </div>
+
+    <!-- ========================================================================= -->
+    <!-- TAB 2: RECEIVE FROM REMOTE -->
+    <!-- ========================================================================= -->
+    <div id="paneReceive" class="tab-pane">
+      <div style="display: flex; justify-content: space-between; align-items: center;">
+        <h3 style="font-size: 0.95rem;">📥 Optical Video Receiver (Remote ➔ Host)</h3>
+        <div style="display: flex; gap: 0.5rem; align-items: center;">
+          <label style="display: flex; align-items: center; gap: 0.35rem; font-size: 0.78rem; cursor: pointer; color: var(--text-dim);" title="Automatically trigger file download when reassembly is verified">
+            <input type="checkbox" id="chkAutoDownload" checked>
+            <span>Auto-Download</span>
+          </label>
+          <button class="btn" onclick="resetReceiver()">🔄 Reset Receiver</button>
+        </div>
+      </div>
+
+      <!-- Optical Signal Banner -->
+      <div id="recvSignalBanner" class="status-banner banner-wait">
+        <span id="recvSignalText">Waiting for optical signal (run encoder_min.py or encoder_v2.py on remote)...</span>
+        <span id="recvGridBadge" class="pill pill-gray">--</span>
+      </div>
+
+      <div class="metrics-grid">
+        <div class="metric-box">
+          <div class="metric-title">Signal Lock</div>
+          <div id="metricGrid" class="metric-value">--</div>
+        </div>
+        <div class="metric-box">
+          <div class="metric-title">Throughput</div>
+          <div id="metricSpeed" class="metric-value">0.0 KB/s</div>
+        </div>
+        <div class="metric-box">
+          <div class="metric-title">Chunks</div>
+          <div id="metricChunks" class="metric-value">0 / 0</div>
+        </div>
+        <div class="metric-box">
+          <div class="metric-title">Elapsed Time</div>
+          <div id="metricTime" class="metric-value">0.0s</div>
+        </div>
+      </div>
+
+      <!-- Progress -->
+      <div class="progress-wrap">
+        <div class="progress-header">
+          <span>Transfer Progress</span>
+          <span id="pctLabel">0.0%</span>
+        </div>
+        <div class="progress-track">
+          <div id="progressBar" class="progress-bar"></div>
+        </div>
+      </div>
+
+      <!-- Live Dewarped Grid View -->
+      <div class="dewarp-panel">
+        <canvas id="dewarpCanvas" width="200" height="200"></canvas>
+        <div class="dewarp-info">
+          <div><b>Perspective Rectification</b></div>
+          <div>Quad Homography maps screen trapezoid into canonical 1000×1000 data plane.</div>
+          <div style="font-family: var(--font-mono); font-size: 0.72rem; color: var(--accent-cyan);" id="dewarpCoords">Awaiting signal lock...</div>
+        </div>
+      </div>
+
+      <!-- Chunk Matrix -->
+      <div class="chunk-matrix-container">
+        <div style="display: flex; justify-content: space-between; font-size: 0.8rem; font-weight: 600;">
+          <span>Chunk Reception Matrix</span>
+          <span style="font-size: 0.7rem; color: var(--text-dim);">
+            <span style="color: var(--accent-green)">■ Data</span> &nbsp;
+            <span style="color: var(--accent-purple)">■ Cauchy Parity</span>
+          </span>
+        </div>
+        <div id="chunkMatrix" class="matrix-box"></div>
+      </div>
+
+      <!-- Log Console -->
+      <div class="log-box" id="logConsole">
+        <div class="log-entry">[Ready] In-browser optical decoder initialized. Click 'Share Screen / Window'.</div>
+      </div>
+    </div>
+
+    <!-- ========================================================================= -->
+    <!-- TAB 3: FILE LIBRARY -->
+    <!-- ========================================================================= -->
+    <div id="paneFiles" class="tab-pane">
+      <div style="display: flex; justify-content: space-between; align-items: center;">
+        <h3 style="font-size: 0.95rem;">📁 Received Files Library (<span id="receivedDirLabel">./received</span>)</h3>
+        <button class="btn" onclick="refreshFilesList()">🔄 Refresh</button>
+      </div>
+
+      <div style="max-height: 440px; overflow-y: auto; border: 1px solid var(--border); border-radius: 8px;">
+        <table class="file-table">
+          <thead>
+            <tr>
+              <th>Filename</th>
+              <th>Size</th>
+              <th>Date Modified</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody id="filesTableBody">
+            <tr><td colspan="4" style="text-align:center; color:var(--text-dim); padding: 1.5rem;">No received files found.</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+  </div>
+</main>
+
+<!-- Transfer Complete Modal -->
+<div id="completeModal" class="modal-overlay">
+  <div class="modal-box">
+    <div class="modal-header">
+      <div class="check-circle">✓</div>
+      <div>
+        <div class="modal-title" style="font-size: 1.15rem; font-weight: 800;">Optical Transfer Complete!</div>
+        <div style="font-size: 0.8rem; color: var(--text-dim);">Reassembled, decompressed, and SHA-256 verified in browser</div>
+      </div>
+    </div>
+
+    <div style="display: flex; flex-direction: column; gap: 0.35rem;">
+      <div class="result-row">
+        <span>File:</span>
+        <b id="resFilename">-</b>
+      </div>
+      <div class="result-row">
+        <span>Original Size:</span>
+        <b id="resSize">-</b>
+      </div>
+      <div class="result-row">
+        <span>Compressed Size:</span>
+        <b id="resCompSize">-</b>
+      </div>
+      <div class="result-row">
+        <span>Throughput:</span>
+        <b id="resSpeed">-</b>
+      </div>
+      <div class="result-row">
+        <span>Elapsed Time:</span>
+        <b id="resElapsed">-</b>
+      </div>
+      <div class="result-row" style="flex-direction: column; gap: 0.2rem;">
+        <span>SHA-256 Hash:</span>
+        <b id="resSha" style="color: var(--accent-green); font-size: 0.75rem;">-</b>
+      </div>
+    </div>
+
+    <div style="display: flex; justify-content: flex-end; gap: 0.5rem; margin-top: 0.5rem;">
+      <button class="btn" onclick="closeModal()">Close</button>
+      <button class="btn" onclick="stageLastReceived()">📤 Stage to Send Back</button>
+      <a id="btnDownload" class="btn btn-primary" href="#" download>⬇ Download File</a>
+    </div>
+  </div>
+</div>
+
+<!-- Included In-Browser Modules -->
+<script src="fec.js"></script>
+<script src="inflate.js"></script>
+<script src="decoder.js"></script>
+<script src="encoder.js"></script>
+
+<script>
+  // Global App State
+  let activeTab = 'send';
+  let activeStream = null;
+  let isCapturing = false;
+  let sendSubMode = 'typer'; // 'typer' or 'broadcast'
+  let lastCompletedResult = null;
+  let lastAckSentTime = 0;
+
+  // Mask & Drawing state
+  let cropRegion = null;
+  let isDrawingMask = false;
+  let isDragging = false;
+  let dragStart = null;
+  let dragCurrent = null;
+  let lastFiducials = null;
+  let autoSnapTriggered = false;
+
+  const videoEl = document.getElementById('videoEl');
+  const videoStage = document.getElementById('videoStage');
+  const overlayCanvas = document.getElementById('overlayCanvas');
+  const overlayCtx = overlayCanvas.getContext('2d');
+  const dewarpCanvas = document.getElementById('dewarpCanvas');
+  const dewarpCtx = dewarpCanvas.getContext('2d');
+  const offscreenCanvas = document.createElement('canvas');
+  const offscreenCtx = offscreenCanvas.getContext('2d', { willReadFrequently: true });
+
+  const receiver = new OTDDecoder.BrowserOpticalReceiver();
+  let broadcaster = null;
+
+  // Metrics
+  let frameCount = 0;
+  let fpsTimer = performance.now();
+  let chimePlayed = false;
+
+  // Logging
+  function logSendMsg(msg) {
+    const consoleEl = document.getElementById('sendConsole');
+    if (!consoleEl) return;
+    const entry = document.createElement('div');
+    entry.className = 'log-entry';
+    const now = new Date().toTimeString().split(' ')[0];
+    entry.textContent = `[${now}] ${msg}`;
+    consoleEl.appendChild(entry);
+    consoleEl.scrollTop = consoleEl.scrollHeight;
+  }
+
+  function logMsg(msg) {
+    const consoleEl = document.getElementById('logConsole');
+    if (!consoleEl) return;
+    const entry = document.createElement('div');
+    entry.className = 'log-entry';
+    const now = new Date().toTimeString().split(' ')[0];
+    entry.textContent = `[${now}] ${msg}`;
+    consoleEl.appendChild(entry);
+    consoleEl.scrollTop = consoleEl.scrollHeight;
+  }
+
+  // Tab Switching
+  function switchTab(tab) {
+    activeTab = tab;
+    document.querySelectorAll('.nav-tab').forEach(b => b.classList.remove('active'));
+    document.querySelectorAll('.tab-pane').forEach(p => p.classList.remove('active'));
+
+    if (tab === 'send') {
+      document.getElementById('tabBtnSend').classList.add('active');
+      document.getElementById('paneSend').classList.add('active');
+    } else if (tab === 'receive') {
+      document.getElementById('tabBtnReceive').classList.add('active');
+      document.getElementById('paneReceive').classList.add('active');
+    } else if (tab === 'files') {
+      document.getElementById('tabBtnFiles').classList.add('active');
+      document.getElementById('paneFiles').classList.add('active');
+      refreshFilesList();
+    }
+  }
+
+  function toggleSendMode() {
+    sendSubMode = (sendSubMode === 'typer') ? 'broadcast' : 'typer';
+    const btn = document.getElementById('btnToggleBroadcast');
+    const typerSec = document.getElementById('sendTyperSection');
+    const bcastSec = document.getElementById('sendBroadcastSection');
+
+    if (sendSubMode === 'broadcast') {
+      btn.textContent = '⌨️ Keyboard Typer';
+      typerSec.style.display = 'none';
+      bcastSec.style.display = 'flex';
+      if (!broadcaster) {
+        const bCanvas = document.getElementById('broadcastCanvas');
+        broadcaster = new OTDEncoder.BrowserOpticalBroadcaster(bCanvas);
+      }
+    } else {
+      btn.textContent = '📺 Screen Broadcast';
+      typerSec.style.display = 'flex';
+      bcastSec.style.display = 'none';
+      if (broadcaster) broadcaster.stop();
+    }
+  }
+
+  // Letterbox Geometry Helper
+  function getVideoDisplayRect() {
+    const stageW = videoStage ? videoStage.clientWidth : overlayCanvas.width;
+    const stageH = videoStage ? videoStage.clientHeight : overlayCanvas.height;
+    const vw = videoEl.videoWidth;
+    const vh = videoEl.videoHeight;
+    if (!vw || !vh || !stageW || !stageH) return null;
+
+    const stageAspect = stageW / stageH;
+    const videoAspect = vw / vh;
+
+    let dw, dh, dx, dy;
+    if (stageAspect > videoAspect) {
+      dh = stageH;
+      dw = stageH * videoAspect;
+      dx = (stageW - dw) / 2;
+      dy = 0;
+    } else {
+      dw = stageW;
+      dh = stageW / videoAspect;
+      dx = 0;
+      dy = (stageH - dh) / 2;
+    }
+    return { dx, dy, dw, dh, videoW: vw, videoH: vh, stageW, stageH };
+  }
+
+  function getPointerVideoCoords(e) {
+    const rect = getVideoDisplayRect();
+    if (!rect) return null;
+    const canvasRect = overlayCanvas.getBoundingClientRect();
+    const pointerX = e.clientX - canvasRect.left;
+    const pointerY = e.clientY - canvasRect.top;
+
+    const clampedX = Math.max(rect.dx, Math.min(rect.dx + rect.dw, pointerX));
+    const clampedY = Math.max(rect.dy, Math.min(rect.dy + rect.dh, pointerY));
+
+    let vx = ((clampedX - rect.dx) / rect.dw) * rect.videoW;
+    let vy = ((clampedY - rect.dy) / rect.dh) * rect.videoH;
+    if (isMirrored) {
+      vx = rect.videoW - vx;
+    }
+    return { x: vx, y: vy };
+  }
+
+  // Screen & Camera Video Capture
+  let captureSource = null; // 'screen' | 'camera' | null
+  let isMirrored = false;
+
+  async function toggleScreenShare() {
+    if (isCapturing && captureSource === 'screen') {
+      stopCapture();
+      return;
+    }
+    if (isCapturing) {
+      stopCapture();
+    }
+    try {
+      activeStream = await navigator.mediaDevices.getDisplayMedia({
+        video: { frameRate: { ideal: 60, max: 60 } },
+        audio: false
+      });
+      captureSource = 'screen';
+      initStream(activeStream);
+      logMsg('Optical screen capture started. In-browser vision active.');
+      logSendMsg('Screen capture active. Monitoring remote client optical feedback.');
+    } catch (err) {
+      logMsg(`Screen share error: ${err.message}`);
+    }
+  }
+
+  async function toggleCamera() {
+    if (isCapturing && captureSource === 'camera') {
+      stopCapture();
+      return;
+    }
+    if (isCapturing) {
+      stopCapture();
+    }
+    await startCameraStream();
+  }
+
+  async function startCameraStream(deviceId = null) {
+    try {
+      const constraints = {
+        video: {
+          width: { ideal: 1920, min: 640 },
+          height: { ideal: 1080, min: 480 },
+          frameRate: { ideal: 60, min: 30 }
+        },
+        audio: false
+      };
+      if (deviceId) {
+        constraints.video.deviceId = { exact: deviceId };
+      } else {
+        constraints.video.facingMode = { ideal: "environment" };
+      }
+
+      activeStream = await navigator.mediaDevices.getUserMedia(constraints);
+      captureSource = 'camera';
+      initStream(activeStream);
+
+      // Populate available camera list after permission is granted
+      await refreshCameraDevices();
+
+      logMsg('Camera feed started. Point camera at optical code or remote screen.');
+      logSendMsg('Camera active. Monitoring remote client optical feedback.');
+    } catch (err) {
+      logMsg(`Camera access error: ${err.message}`);
+      alert(`Could not start camera: ${err.message}\nMake sure camera permissions are granted in your browser.`);
+    }
+  }
+
+  async function refreshCameraDevices() {
+    try {
+      if (!navigator.mediaDevices || !navigator.mediaDevices.enumerateDevices) return;
+      const devices = await navigator.mediaDevices.enumerateDevices();
+      const videoDevices = devices.filter(d => d.kind === 'videoinput');
+      const select = document.getElementById('cameraSelect');
+      const lblMirror = document.getElementById('lblMirrorCamera');
+
+      if (videoDevices.length > 0) {
+        select.style.display = 'inline-block';
+        lblMirror.style.display = 'inline-flex';
+        select.innerHTML = '';
+        videoDevices.forEach((d, idx) => {
+          const opt = document.createElement('option');
+          opt.value = d.deviceId;
+          opt.textContent = d.label || `Camera ${idx + 1}`;
+          select.appendChild(opt);
+        });
+
+        // Select current active track's deviceId
+        if (activeStream) {
+          const track = activeStream.getVideoTracks()[0];
+          const settings = track ? track.getSettings() : null;
+          if (settings && settings.deviceId) {
+            select.value = settings.deviceId;
+          }
+        }
+      }
+    } catch (e) {
+      console.warn("Could not enumerate camera devices:", e);
+    }
+  }
+
+  function onCameraDeviceChanged(deviceId) {
+    if (deviceId) {
+      startCameraStream(deviceId);
+    }
+  }
+
+  function onMirrorToggled() {
+    isMirrored = document.getElementById('chkMirrorCamera').checked;
+    videoEl.style.transform = isMirrored ? 'scaleX(-1)' : 'none';
+    overlayCanvas.style.transform = isMirrored ? 'scaleX(-1)' : 'none';
+    logMsg(`Camera mirroring: ${isMirrored ? 'ON' : 'OFF'}`);
+    redrawOverlay();
+  }
+
+  function initStream(stream) {
+    videoEl.srcObject = stream;
+    document.getElementById('stagePlaceholder').style.display = 'none';
+
+    updateCaptureButtons();
+
+    stream.getVideoTracks()[0].onended = () => stopCapture();
+    isCapturing = true;
+    receiver.reset();
+    chimePlayed = false;
+    document.getElementById('chunkMatrix').innerHTML = '';
+
+    startCaptureLoop();
+  }
+
+  function updateCaptureButtons() {
+    const btnScreen = document.getElementById('btnShareScreen');
+    const btnCamera = document.getElementById('btnToggleCamera');
+    const select = document.getElementById('cameraSelect');
+    const lblMirror = document.getElementById('lblMirrorCamera');
+
+    if (captureSource === 'screen') {
+      btnScreen.textContent = '🛑 Stop Screen';
+      btnScreen.className = 'btn btn-danger';
+      btnCamera.textContent = '📷 Use Camera';
+      btnCamera.className = 'btn';
+      select.style.display = 'none';
+      lblMirror.style.display = 'none';
+      videoEl.style.transform = 'none';
+      overlayCanvas.style.transform = 'none';
+    } else if (captureSource === 'camera') {
+      btnCamera.textContent = '🛑 Stop Camera';
+      btnCamera.className = 'btn btn-danger';
+      btnScreen.textContent = '📺 Share Screen';
+      btnScreen.className = 'btn';
+      select.style.display = 'inline-block';
+      lblMirror.style.display = 'inline-flex';
+      videoEl.style.transform = isMirrored ? 'scaleX(-1)' : 'none';
+      overlayCanvas.style.transform = isMirrored ? 'scaleX(-1)' : 'none';
+    } else {
+      btnScreen.textContent = '📺 Share Screen';
+      btnScreen.className = 'btn btn-primary';
+      btnCamera.textContent = '📷 Use Camera';
+      btnCamera.className = 'btn';
+      select.style.display = 'none';
+      lblMirror.style.display = 'none';
+      videoEl.style.transform = 'none';
+      overlayCanvas.style.transform = 'none';
+    }
+  }
+
+  function stopCapture() {
+    isCapturing = false;
+    captureSource = null;
+    if (activeStream) {
+      activeStream.getTracks().forEach(t => t.stop());
+      activeStream = null;
+    }
+    videoEl.srcObject = null;
+    document.getElementById('stagePlaceholder').style.display = 'block';
+    updateCaptureButtons();
+    document.getElementById('linkPill').className = 'pill pill-gray';
+    document.getElementById('linkPill').textContent = '○ SEARCHING';
+    overlayCtx.clearRect(0, 0, overlayCanvas.width, overlayCanvas.height);
+  }
+
+  // Optical Frame Processing Loop (100% In-Browser)
+  async function startCaptureLoop() {
+    while (isCapturing) {
+      if (videoEl.readyState >= 2 && videoEl.videoWidth > 0) {
+        const vw = videoEl.videoWidth;
+        const vh = videoEl.videoHeight;
+
+        let sx = 0, sy = 0, sw = vw, sh = vh;
+        if (cropRegion && cropRegion.w > 40 && cropRegion.h > 40) {
+          sx = Math.max(0, Math.min(vw - 20, cropRegion.x));
+          sy = Math.max(0, Math.min(vh - 20, cropRegion.y));
+          sw = Math.max(20, Math.min(vw - sx, cropRegion.w));
+          sh = Math.max(20, Math.min(vh - sy, cropRegion.h));
+
+          offscreenCanvas.width = sw;
+          offscreenCanvas.height = sh;
+          if (isMirrored) {
+            offscreenCtx.save();
+            offscreenCtx.translate(sw, 0);
+            offscreenCtx.scale(-1, 1);
+            offscreenCtx.drawImage(videoEl, sx, sy, sw, sh, 0, 0, sw, sh);
+            offscreenCtx.restore();
+          } else {
+            offscreenCtx.drawImage(videoEl, sx, sy, sw, sh, 0, 0, sw, sh);
+          }
+        } else {
+          const maxDim = Math.max(vw, vh);
+          const scale = maxDim > 1920 ? (1920 / maxDim) : 1;
+          offscreenCanvas.width = Math.round(vw * scale);
+          offscreenCanvas.height = Math.round(vh * scale);
+          if (isMirrored) {
+            offscreenCtx.save();
+            offscreenCtx.translate(offscreenCanvas.width, 0);
+            offscreenCtx.scale(-1, 1);
+            offscreenCtx.drawImage(videoEl, 0, 0, offscreenCanvas.width, offscreenCanvas.height);
+            offscreenCtx.restore();
+          } else {
+            offscreenCtx.drawImage(videoEl, 0, 0, offscreenCanvas.width, offscreenCanvas.height);
+          }
+        }
+
+        const imgData = offscreenCtx.getImageData(0, 0, offscreenCanvas.width, offscreenCanvas.height);
+        const res = await receiver.processFrame(imgData);
+
+        handleFrameResult(res);
+
+        // FPS calculation
+        frameCount++;
+        const now = performance.now();
+        if (now - fpsTimer >= 1000) {
+          const fps = (frameCount * 1000) / (now - fpsTimer);
+          document.getElementById('fpsBadge').textContent = `${fps.toFixed(1)} FPS`;
+          frameCount = 0;
+          fpsTimer = now;
+        }
+      }
+
+      await new Promise(r => setTimeout(r, 8)); // ~60-100 FPS capability
+    }
+  }
+
+  function handleFrameResult(res) {
+    let adjustedFiducials = null;
+    if (res.fiducials && res.fiducials.length === 4) {
+      if (cropRegion && cropRegion.w > 40) {
+        adjustedFiducials = res.fiducials.map(pt => [
+          pt[0] + cropRegion.x,
+          pt[1] + cropRegion.y
+        ]);
+      } else {
+        const scaleX = offscreenCanvas.width > 0 ? (videoEl.videoWidth / offscreenCanvas.width) : 1;
+        const scaleY = offscreenCanvas.height > 0 ? (videoEl.videoHeight / offscreenCanvas.height) : 1;
+        adjustedFiducials = res.fiducials.map(pt => [
+          pt[0] * scaleX,
+          pt[1] * scaleY
+        ]);
+      }
+      lastFiducials = adjustedFiducials;
+
+      // Auto-Lock mask
+      const chkAuto = document.getElementById('chkAutoSnap');
+      if (chkAuto && chkAuto.checked && !cropRegion && !autoSnapTriggered && receiver.tracker.confidence >= 2) {
+        autoSnapMask();
+      }
+    }
+
+    document.getElementById('fidsStatus').textContent = `Fiducials: ${adjustedFiducials ? adjustedFiducials.length : 0}/4`;
+
+    // 1. Check if parsedFrame is an optical ACK frame from client.py
+    if (res.parsedFrame && res.parsedFrame.ackInfo) {
+      handleClientAckFrame(res.parsedFrame, adjustedFiducials);
+    }
+
+    // 2. Update Link Status Pill
+    const pill = document.getElementById('linkPill');
+    if (res.isComplete) {
+      pill.className = 'pill pill-green';
+      pill.textContent = '● TRANSFER COMPLETE';
+    } else if (res.status === 'receiving') {
+      pill.className = 'pill pill-green';
+      pill.textContent = `● RECEIVING (${res.stats.collectedChunks}/${res.stats.totalChunks})`;
+    } else if (adjustedFiducials) {
+      pill.className = 'pill pill-cyan';
+      pill.textContent = '● SIGNAL LOCKED';
+    } else {
+      pill.className = 'pill pill-gray';
+      pill.textContent = '○ SEARCHING';
+    }
+
+    // 3. Update Receive Tab Metrics
+    document.getElementById('metricGrid').textContent = res.stats.gridSize ? `${res.stats.gridSize}×${res.stats.gridSize} ${res.stats.mode.toUpperCase()}` : '--';
+    document.getElementById('metricSpeed').textContent = `${res.stats.speedKbps} KB/s`;
+    document.getElementById('metricChunks').textContent = `${res.stats.collectedChunks} / ${res.stats.totalChunks || '--'}`;
+    document.getElementById('metricTime').textContent = `${res.stats.elapsedSec}s`;
+    document.getElementById('pctLabel').textContent = `${res.stats.percent}%`;
+    document.getElementById('progressBar').style.width = `${res.stats.percent}%`;
+
+    // 4. Redraw Overlay
+    redrawOverlay(adjustedFiducials);
+
+    // 5. Update Live Dewarped Canvas
+    if (res.homography && offscreenCanvas.width > 0) {
+      renderDewarpPreview(res.homography);
+    }
+
+    // 6. Update Receive Matrix
+    if (res.stats.totalChunks > 0 && !res.parsedFrame?.ackInfo) {
+      updateChunkMatrix(res.stats.totalChunks, receiver.collectedChunks);
+    }
+
+    // 7. Receive Completion Handlers
+    if (res.isComplete && res.result && !chimePlayed) {
+      chimePlayed = true;
+      lastCompletedResult = res.result;
+      playSuccessChime();
+      showModal(res.result);
+      if (document.getElementById('chkAutoDownload').checked) {
+        triggerDownload(res.result);
+      }
+      saveFileToDisk(res.result);
+    }
+  }
+
+  // Optical ACK Frame Handler (Client -> Host via Optical Grid)
+  function handleClientAckFrame(parsedFrame, fiducials) {
+    const ack = parsedFrame.ackInfo;
+    const now = performance.now();
+
+    // Fast local UI update for Send Tab
+    updateSendFromAck(ack);
+
+    // Forward to backend typer via /api/ack (debounced to max 25Hz)
+    if (now - lastAckSentTime > 35) {
+      lastAckSentTime = now;
+      let b64 = "";
+      const bytes = parsedFrame.payload;
+      for (let i = 0; i < bytes.length; i++) b64 += String.fromCharCode(bytes[i]);
+      b64 = btoa(b64);
+
+      fetch('/api/ack', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ payload_b64: b64, fiducials })
+      })
+      .then(r => r.json())
+      .then(d => {
+        if (d.send) updateSendTelemetry(d.send);
+      })
+      .catch(() => {});
+    }
+  }
+
+  function updateSendFromAck(ack) {
+    const banner = document.getElementById('clientStatusBanner');
+    const bannerText = document.getElementById('clientStatusText');
+    const seqBadge = document.getElementById('clientFocusSeq');
+
+    seqBadge.textContent = `SEQ ${ack.focusSeq}`;
+
+    if (ack.state === 0) {
+      banner.className = 'status-banner banner-wait';
+      bannerText.textContent = 'Waiting for Client Window Focus (Press ENTER or SPACE in client)...';
+      document.getElementById('statSendState').textContent = 'WAITING FOR FOCUS';
+    } else if (ack.state === 1) {
+      banner.className = 'status-banner banner-active';
+      bannerText.textContent = `Client Keyboard Focus CONFIRMED via Optical Grid (SEQ ${ack.focusSeq})! Starting typing...`;
+      document.getElementById('statSendState').textContent = 'KEYBOARD FOCUSED';
+    } else if (ack.state === 2) {
+      banner.className = 'status-banner banner-active';
+      bannerText.textContent = `Transmitting chunks: Client acknowledged chunk ${ack.lastAck} (${ack.receivedCount}/${ack.totalChunks})`;
+      document.getElementById('statSendState').textContent = 'RECEIVING DATA';
+    } else if (ack.state === 3) {
+      banner.className = 'status-banner banner-success';
+      bannerText.textContent = '✓ Transfer 100% Complete & Verified by Client Optical Grid!';
+      document.getElementById('statSendState').textContent = 'VERIFIED COMPLETE';
+    }
+  }
+
+  function updateSendTelemetry(send) {
+    if (!send) return;
+    if (send.client_state) {
+      document.getElementById('statSendState').textContent = send.client_state.replace('_', ' ');
+    }
+    document.getElementById('statSendChunks').textContent = `${send.chunks_acked} / ${send.total_chunks}`;
+    document.getElementById('statSendSpeed').textContent = (send.speed_bps / 1024).toFixed(1);
+    document.getElementById('statSendRetries').textContent = send.retransmissions;
+    document.getElementById('sendProgressLabel').textContent = `Progress: ${send.progress_pct}%`;
+    document.getElementById('sendSpeedLabel').textContent = `${(send.speed_bps / 1024).toFixed(1)} KB/s`;
+    document.getElementById('sendProgressFill').style.width = `${send.progress_pct}%`;
+
+    if (send.filename) {
+      document.getElementById('stagedFileDesc').textContent = `Staged: ${send.filename} (${send.total_chunks} chunks)`;
+    }
+
+    if (send.typer_backend) {
+      document.getElementById('typerPill').textContent = `● TYPER: ${send.typer_backend.toUpperCase()}`;
+    }
+
+    // Render Send chunk matrix
+    if (send.total_chunks > 0) {
+      renderSendChunkMatrix(send.total_chunks, send.chunks_acked);
+    }
+  }
+
+  function renderSendChunkMatrix(total, ackedCount) {
+    const box = document.getElementById('sendChunkMatrix');
+    if (!box) return;
+    if (box.children.length !== total) {
+      box.innerHTML = '';
+      for (let i = 0; i < total; i++) {
+        const c = document.createElement('div');
+        c.className = 'matrix-cell';
+        c.id = `send_cell_${i}`;
+        box.appendChild(c);
+      }
+    }
+    for (let i = 0; i < total; i++) {
+      const cell = document.getElementById(`send_cell_${i}`);
+      if (cell) {
+        if (i < ackedCount) {
+          cell.className = 'matrix-cell acked';
+        } else if (i === ackedCount) {
+          cell.className = 'matrix-cell active';
+        } else {
+          cell.className = 'matrix-cell';
+        }
+      }
+    }
+  }
+
+  // Dewarped Preview Rendering (Canonical 1000x1000)
+  function renderDewarpPreview(homography) {
+    const dw = dewarpCanvas.width;
+    const dh = dewarpCanvas.height;
+    const imgData = dewarpCtx.createImageData(dw, dh);
+    const srcData = offscreenCtx.getImageData(0, 0, offscreenCanvas.width, offscreenCanvas.height);
+    const sw = srcData.width;
+    const sh = srcData.height;
+    const sBuf = srcData.data;
+    const dBuf = imgData.data;
+
+    for (let y = 0; y < dh; y++) {
+      const cy = (y / dh) * 1000.0;
+      const dRow = y * dw * 4;
+      for (let x = 0; x < dw; x++) {
+        const cx = (x / dw) * 1000.0;
+        const [px, py] = homography.projectCanonical(cx, cy);
+        const ix = Math.max(0, Math.min(sw - 1, Math.round(px)));
+        const iy = Math.max(0, Math.min(sh - 1, Math.round(py)));
+        const sIdx = (iy * sw + ix) * 4;
+        const dIdx = dRow + x * 4;
+
+        dBuf[dIdx] = sBuf[sIdx];
+        dBuf[dIdx + 1] = sBuf[sIdx + 1];
+        dBuf[dIdx + 2] = sBuf[sIdx + 2];
+        dBuf[dIdx + 3] = 255;
+      }
+    }
+    dewarpCtx.putImageData(imgData, 0, 0);
+    document.getElementById('dewarpCoords').textContent = `Quad: (${Math.round(homography.tl[0])},${Math.round(homography.tl[1])}) → (${Math.round(homography.br[0])},${Math.round(homography.br[1])})`;
+  }
+
+  function updateChunkMatrix(total, collected) {
+    const box = document.getElementById('chunkMatrix');
+    if (box.children.length !== total) {
+      box.innerHTML = '';
+      for (let i = 0; i < total; i++) {
+        const c = document.createElement('div');
+        c.className = 'matrix-cell';
+        c.id = `cell_${i}`;
+        box.appendChild(c);
+      }
+    }
+    for (const k in collected) {
+      const idx = Number(k);
+      let cell = document.getElementById(`cell_${idx}`);
+      if (!cell && idx >= total) {
+        cell = document.createElement('div');
+        cell.className = 'matrix-cell parity';
+        cell.id = `cell_${idx}`;
+        box.appendChild(cell);
+      } else if (cell) {
+        cell.className = idx >= total ? 'matrix-cell parity' : 'matrix-cell data';
+      }
+    }
+  }
+
+  // Overlay Canvas Drawing
+  function redrawOverlay(fiducials = lastFiducials) {
+    const rect = getVideoDisplayRect();
+    if (!rect) return;
+
+    if (overlayCanvas.width !== rect.stageW || overlayCanvas.height !== rect.stageH) {
+      overlayCanvas.width = rect.stageW;
+      overlayCanvas.height = rect.stageH;
+    }
+    overlayCtx.clearRect(0, 0, overlayCanvas.width, overlayCanvas.height);
+
+    // 1. Draw Transmission Mask
+    if (cropRegion && cropRegion.w > 20 && cropRegion.h > 20) {
+      const dx = rect.dx + (cropRegion.x / rect.videoW) * rect.dw;
+      const dy = rect.dy + (cropRegion.y / rect.videoH) * rect.dh;
+      const dw = (cropRegion.w / rect.videoW) * rect.dw;
+      const dh = (cropRegion.h / rect.videoH) * rect.dh;
+
+      overlayCtx.save();
+      overlayCtx.fillStyle = 'rgba(9, 13, 22, 0.70)';
+      overlayCtx.beginPath();
+      overlayCtx.rect(0, 0, overlayCanvas.width, overlayCanvas.height);
+      overlayCtx.rect(dx, dy, dw, dh);
+      overlayCtx.fill('evenodd');
+
+      overlayCtx.strokeStyle = '#06b6d4';
+      overlayCtx.lineWidth = 2;
+      overlayCtx.strokeRect(dx, dy, dw, dh);
+
+      const clen = Math.min(22, dw / 4, dh / 4);
+      overlayCtx.strokeStyle = '#10b981';
+      overlayCtx.lineWidth = 3;
+
+      overlayCtx.beginPath();
+      overlayCtx.moveTo(dx, dy + clen); overlayCtx.lineTo(dx, dy); overlayCtx.lineTo(dx + clen, dy);
+      overlayCtx.stroke();
+      overlayCtx.beginPath();
+      overlayCtx.moveTo(dx + dw - clen, dy); overlayCtx.lineTo(dx + dw, dy); overlayCtx.lineTo(dx + dw, dy + clen);
+      overlayCtx.stroke();
+      overlayCtx.beginPath();
+      overlayCtx.moveTo(dx + dw, dy + dh - clen); overlayCtx.lineTo(dx + dw, dy + dh); overlayCtx.lineTo(dx + dw - clen, dy + dh);
+      overlayCtx.stroke();
+      overlayCtx.beginPath();
+      overlayCtx.moveTo(dx + clen, dy + dh); overlayCtx.lineTo(dx, dy + dh); overlayCtx.lineTo(dx, dy + dh - clen);
+      overlayCtx.stroke();
+
+      overlayCtx.fillStyle = '#06b6d4';
+      overlayCtx.font = 'bold 11px monospace';
+      const tagY = dy - 6 > 14 ? dy - 6 : dy + 16;
+      overlayCtx.fillText(`MASKED AREA (${Math.round(cropRegion.w)}×${Math.round(cropRegion.h)})`, dx + 4, tagY);
+      overlayCtx.restore();
+    }
+
+    // 2. Dragging Selection Box
+    if (isDragging && dragStart && dragCurrent) {
+      const x1 = Math.min(dragStart.x, dragCurrent.x);
+      const y1 = Math.min(dragStart.y, dragCurrent.y);
+      const w = Math.abs(dragCurrent.x - dragStart.x);
+      const h = Math.abs(dragCurrent.y - dragStart.y);
+
+      const dx = rect.dx + (x1 / rect.videoW) * rect.dw;
+      const dy = rect.dy + (y1 / rect.videoH) * rect.dh;
+      const dw = (w / rect.videoW) * rect.dw;
+      const dh = (h / rect.videoH) * rect.dh;
+
+      overlayCtx.save();
+      overlayCtx.strokeStyle = '#38bdf8';
+      overlayCtx.lineWidth = 2;
+      overlayCtx.setLineDash([6, 4]);
+      overlayCtx.fillStyle = 'rgba(56, 189, 248, 0.15)';
+      overlayCtx.fillRect(dx, dy, dw, dh);
+      overlayCtx.strokeRect(dx, dy, dw, dh);
+      overlayCtx.restore();
+    }
+
+    // 3. Fiducial Markers
+    if (fiducials && fiducials.length === 4) {
+      const toDisplayPt = (pt) => [
+        rect.dx + (pt[0] / rect.videoW) * rect.dw,
+        rect.dy + (pt[1] / rect.videoH) * rect.dh
+      ];
+      const [tl, tr, br, bl] = fiducials.map(toDisplayPt);
+
+      overlayCtx.save();
+      overlayCtx.beginPath();
+      overlayCtx.moveTo(tl[0], tl[1]);
+      overlayCtx.lineTo(tr[0], tr[1]);
+      overlayCtx.lineTo(br[0], br[1]);
+      overlayCtx.lineTo(bl[0], bl[1]);
+      overlayCtx.closePath();
+      overlayCtx.lineWidth = 2.5;
+      overlayCtx.strokeStyle = '#06b6d4';
+      overlayCtx.stroke();
+      overlayCtx.fillStyle = 'rgba(6, 182, 212, 0.08)';
+      overlayCtx.fill();
+
+      const corners = [
+        { pt: tl, col: '#ef4444' }, // TL Red
+        { pt: tr, col: '#22c55e' }, // TR Green
+        { pt: bl, col: '#3b82f6' }, // BL Blue
+        { pt: br, col: '#d946ef' }  // BR Magenta
+      ];
+      corners.forEach(c => {
+        overlayCtx.beginPath();
+        overlayCtx.arc(c.pt[0], c.pt[1], 6, 0, 2 * Math.PI);
+        overlayCtx.fillStyle = c.col;
+        overlayCtx.fill();
+        overlayCtx.lineWidth = 2;
+        overlayCtx.strokeStyle = '#ffffff';
+        overlayCtx.stroke();
+      });
+      overlayCtx.restore();
+    }
+  }
+
+  // Masking Actions
+  function autoSnapMask() {
+    if (!lastFiducials || lastFiducials.length !== 4) {
+      logMsg('[Mask] Waiting for optical signal to be detected first.');
+      return;
+    }
+    const xs = lastFiducials.map(p => p[0]);
+    const ys = lastFiducials.map(p => p[1]);
+    const minX = Math.min(...xs), maxX = Math.max(...xs);
+    const minY = Math.min(...ys), maxY = Math.max(...ys);
+
+    const w = maxX - minX, h = maxY - minY;
+    const padX = w * 0.15, padY = h * 0.15;
+
+    const cx = Math.max(0, Math.round(minX - padX));
+    const cy = Math.max(0, Math.round(minY - padY));
+    const cw = Math.min(videoEl.videoWidth - cx, Math.round(w + padX * 2));
+    const ch = Math.min(videoEl.videoHeight - cy, Math.round(h + padY * 2));
+
+    cropRegion = { x: cx, y: cy, w: cw, h: ch };
+    autoSnapTriggered = true;
+    receiver.tracker.prevFiducials = null;
+    receiver.tracker.emaFiducials = null;
+    receiver.tracker.confidence = 0;
+    updateMaskUI();
+    logMsg(`[Mask] Auto-snapped mask: ${cw}×${ch} px.`);
+    redrawOverlay();
+  }
+
+  function clearMask() {
+    cropRegion = null;
+    autoSnapTriggered = false;
+    receiver.tracker.prevFiducials = null;
+    receiver.tracker.emaFiducials = null;
+    receiver.tracker.confidence = 0;
+    updateMaskUI();
+    logMsg('[Mask] Mask cleared.');
+    redrawOverlay();
+  }
+
+  function updateMaskUI() {
+    if (cropRegion && videoEl.videoWidth > 0) {
+      const totalPixels = videoEl.videoWidth * videoEl.videoHeight;
+      const maskPixels = cropRegion.w * cropRegion.h;
+      const savedPct = Math.max(0, Math.round((1 - (maskPixels / totalPixels)) * 100));
+      document.getElementById('maskStatus').textContent = `Mask: ${cropRegion.w}×${cropRegion.h} (${savedPct}% saved)`;
+    } else {
+      document.getElementById('maskStatus').textContent = 'Full Video (No Mask)';
+    }
+  }
+
+  function toggleDrawMask() {
+    isDrawingMask = !isDrawingMask;
+    const btn = document.getElementById('btnDrawMask');
+    if (isDrawingMask) {
+      btn.style.borderColor = 'var(--accent-cyan)';
+      btn.style.color = 'var(--accent-cyan)';
+      videoStage.classList.add('draw-mode');
+      overlayCanvas.style.cursor = 'crosshair';
+      logMsg('[Mask] Drag rectangle across video to set boundary.');
+    } else {
+      btn.style.borderColor = '#334155';
+      btn.style.color = '#fff';
+      videoStage.classList.remove('draw-mode');
+      overlayCanvas.style.cursor = 'default';
+    }
+  }
+
+  overlayCanvas.addEventListener('pointerdown', (e) => {
+    if (!isCapturing || videoEl.videoWidth === 0) return;
+    const pt = getPointerVideoCoords(e);
+    if (!pt) return;
+    isDragging = true;
+    dragStart = pt;
+    dragCurrent = pt;
+    overlayCanvas.setPointerCapture(e.pointerId);
+  });
+
+  window.addEventListener('pointermove', (e) => {
+    if (!isDragging) return;
+    const pt = getPointerVideoCoords(e);
+    if (!pt) return;
+    dragCurrent = pt;
+    redrawOverlay();
+  });
+
+  window.addEventListener('pointerup', (e) => {
+    if (!isDragging) return;
+    isDragging = false;
+    const pt = getPointerVideoCoords(e) || dragCurrent;
+    const x1 = Math.min(dragStart.x, pt.x);
+    const y1 = Math.min(dragStart.y, pt.y);
+    const x2 = Math.max(dragStart.x, pt.x);
+    const y2 = Math.max(dragStart.y, pt.y);
+    const w = x2 - x1, h = y2 - y1;
+
+    if (w > 40 && h > 40) {
+      cropRegion = { x: Math.round(x1), y: Math.round(y1), w: Math.round(w), h: Math.round(h) };
+      autoSnapTriggered = true;
+      receiver.tracker.prevFiducials = null;
+      receiver.tracker.emaFiducials = null;
+      receiver.tracker.confidence = 0;
+      updateMaskUI();
+      logMsg(`[Mask] Transmission boundary set: ${cropRegion.w}×${cropRegion.h} px.`);
+    }
+
+    if (isDrawingMask) toggleDrawMask();
+    dragStart = null;
+    dragCurrent = null;
+    redrawOverlay();
+  });
+
+  // Reset Receiver State
+  function resetReceiver() {
+    receiver.reset();
+    chimePlayed = false;
+    document.getElementById('chunkMatrix').innerHTML = '';
+    document.getElementById('progressBar').style.width = '0%';
+    document.getElementById('pctLabel').textContent = '0.0%';
+    document.getElementById('metricChunks').textContent = '0 / 0';
+    document.getElementById('metricSpeed').textContent = '0.0 KB/s';
+    document.getElementById('metricTime').textContent = '0.0s';
+    logMsg('[Receiver] State reset.');
+  }
+
+  // =========================================================================
+  // SEND MODE ACTIONS & TELEMETRY
+  // =========================================================================
+  async function handleFileSelect(files) {
+    if (!files || files.length === 0) return;
+    const file = files[0];
+    document.getElementById('stagedFileDesc').textContent = `Staging '${file.name}' (${(file.size / 1024).toFixed(1)} KB)...`;
+    logSendMsg(`Staging file '${file.name}'...`);
+
+    // 1. Stage in backend typer (server_v2 session)
+    const formData = new FormData();
+    formData.append('file', file, file.name);
+
+    try {
+      const resp = await fetch('/api/upload', { method: 'POST', body: formData });
+      const data = await resp.json();
+      if (data.status === 'ok') {
+        logSendMsg(`File '${file.name}' staged in Duplex Typer.`);
+        updateSendTelemetry(data.send);
+      } else {
+        logSendMsg(`Staging error: ${data.message}`);
+      }
+    } catch (e) {
+      logSendMsg(`Could not connect to backend typer: ${e.message}`);
+    }
+
+    // 2. Also stage in In-Browser Optical Broadcaster for visual display
+    try {
+      const buffer = await file.arrayBuffer();
+      const rawBytes = new Uint8Array(buffer);
+      if (!broadcaster) {
+        const bCanvas = document.getElementById('broadcastCanvas');
+        broadcaster = new OTDEncoder.BrowserOpticalBroadcaster(bCanvas);
+      }
+      const bRes = await broadcaster.stageFile(file.name, rawBytes, 64, 15);
+      document.getElementById('broadcastInfo').textContent = `Staged: ${file.name} (${bRes.totalFrames} visual frames, ${bRes.dataFrames} data + FEC)`;
+    } catch (e) {
+      console.warn("Broadcaster stage failed:", e);
+    }
+  }
+
+  // Dropzone drag-and-drop
+  const dropzone = document.getElementById('dropzone');
+  dropzone.addEventListener('dragover', (e) => { e.preventDefault(); dropzone.classList.add('dragover'); });
+  dropzone.addEventListener('dragleave', () => dropzone.classList.remove('dragover'));
+  dropzone.addEventListener('drop', (e) => {
+    e.preventDefault();
+    dropzone.classList.remove('dragover');
+    handleFileSelect(e.dataTransfer.files);
+  });
+
+  async function setSpeed(preset) {
+    document.querySelectorAll('.preset-btn').forEach(b => b.classList.remove('active'));
+    if (preset === 'turbo') document.getElementById('btnSpeedTurbo').classList.add('active');
+    else if (preset === 'fast') document.getElementById('btnSpeedFast').classList.add('active');
+    else if (preset === 'balanced') document.getElementById('btnSpeedBalanced').classList.add('active');
+    else if (preset === 'safe') document.getElementById('btnSpeedSafe').classList.add('active');
+
+    try {
+      const resp = await fetch('/api/speed', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ preset })
+      });
+      const data = await resp.json();
+      if (data.send) updateSendTelemetry(data.send);
+      logSendMsg(`Speed preset set to ${preset.toUpperCase()}`);
+    } catch (e) {}
+  }
+
+  async function sendChat() {
+    const input = document.getElementById('chatInput');
+    const text = input.value.trim();
+    if (!text) return;
+    try {
+      await fetch('/api/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text })
+      });
+      logSendMsg(`[Typed Chat] "${text}"`);
+      input.value = '';
+    } catch (e) {
+      logSendMsg(`Failed to type command: ${e.message}`);
+    }
+  }
+
+  async function emergencyStop() {
+    try {
+      const resp = await fetch('/api/abort', { method: 'POST' });
+      const data = await resp.json();
+      if (data.send) updateSendTelemetry(data.send);
+      logSendMsg('🛑 EMERGENCY STOP: Transmission immediately aborted.');
+    } catch (e) {
+      logSendMsg('Emergency stop sent.');
+    }
+    if (broadcaster) broadcaster.stop();
+  }
+
+  async function requestKeyboardAccess() {
+    try {
+      const resp = await fetch('/api/request_keyboard', { method: 'POST' });
+      const data = await resp.json();
+      if (data.granted) {
+        logSendMsg('Keyboard test keystroke sent. Check for OS permissions prompt.');
+      }
+    } catch (e) {}
+  }
+
+  // Periodic Telemetry Polling (every 500ms)
+  setInterval(async () => {
+    try {
+      const resp = await fetch('/api/status');
+      const data = await resp.json();
+      if (data.send) updateSendTelemetry(data.send);
+      if (data.files) updateFilesCount(data.files.length);
+      if (data.backend) {
+        document.getElementById('typerPill').textContent = `● TYPER: ${data.backend.toUpperCase()}`;
+      }
+    } catch (e) {}
+  }, 500);
+
+  // =========================================================================
+  // FILE LIBRARY ACTIONS
+  // =========================================================================
+  async function refreshFilesList() {
+    try {
+      const resp = await fetch('/api/files');
+      const files = await resp.json();
+      updateFilesTable(files);
+      updateFilesCount(files.length);
+    } catch (e) {}
+  }
+
+  function updateFilesCount(count) {
+    const badge = document.getElementById('filesCountBadge');
+    if (badge) badge.textContent = count;
+  }
+
+  function updateFilesTable(files) {
+    const tbody = document.getElementById('filesTableBody');
+    if (!files || files.length === 0) {
+      tbody.innerHTML = '<tr><td colspan="4" style="text-align:center; color:var(--text-dim); padding: 1.5rem;">No received files found.</td></tr>';
+      return;
+    }
+    tbody.innerHTML = '';
+    files.forEach(f => {
+      const tr = document.createElement('tr');
+      tr.innerHTML = `
+        <td><b>${escapeHtml(f.filename)}</b></td>
+        <td>${f.size_str}</td>
+        <td style="color:var(--text-dim); font-size:0.75rem;">${f.mtime_str}</td>
+        <td>
+          <div style="display:flex; gap:0.35rem;">
+            <a class="btn" style="padding:0.25rem 0.55rem; font-size:0.75rem;" href="/download/${encodeURIComponent(f.filename)}" download>⬇ Download</a>
+            <button class="btn btn-primary" style="padding:0.25rem 0.55rem; font-size:0.75rem;" onclick="stageReceivedFile('${escapeHtml(f.filename)}')">📤 Stage to Send</button>
+            <button class="btn" style="padding:0.25rem 0.45rem; font-size:0.75rem; color:#f87171;" onclick="deleteFile('${escapeHtml(f.filename)}')">🗑</button>
+          </div>
+        </td>
+      `;
+      tbody.appendChild(tr);
+    });
+  }
+
+  async function stageReceivedFile(filename) {
+    try {
+      const resp = await fetch('/api/stage_received', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ filename })
+      });
+      const data = await resp.json();
+      if (data.status === 'ok') {
+        logSendMsg(`File '${filename}' staged from library.`);
+        switchTab('send');
+        if (data.send) updateSendTelemetry(data.send);
+      }
+    } catch (e) {}
+  }
+
+  async function deleteFile(filename) {
+    if (!confirm(`Delete '${filename}' from received directory?`)) return;
+    try {
+      const resp = await fetch('/api/delete_file', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ filename })
+      });
+      const data = await resp.json();
+      if (data.files) updateFilesTable(data.files);
+    } catch (e) {}
+  }
+
+  function stageLastReceived() {
+    closeModal();
+    if (lastCompletedResult && lastCompletedResult.filename) {
+      stageReceivedFile(lastCompletedResult.filename);
+    }
+  }
+
+  async function saveFileToDisk(res) {
+    if (!res || !res.data) return;
+    try {
+      let b64 = "";
+      const bytes = res.data;
+      const len = bytes.length;
+      for (let i = 0; i < len; i += 8192) {
+        const sub = bytes.subarray(i, Math.min(len, i + 8192));
+        b64 += String.fromCharCode.apply(null, sub);
+      }
+      b64 = btoa(b64);
+
+      const resp = await fetch('/api/save_file', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ filename: res.filename, data_b64: b64 })
+      });
+      const data = await resp.json();
+      if (data.files) updateFilesCount(data.files.length);
+      logMsg(`[File Library] Saved '${res.filename}' to ./received`);
+    } catch (e) {}
+  }
+
+  // =========================================================================
+  // VISUAL SCREEN BROADCASTER (Pure In-Browser Optical Transmitter)
+  // =========================================================================
+  function toggleBroadcastPlay() {
+    if (!broadcaster || broadcaster.totalFrames === 0) {
+      alert("Stage a file first to broadcast optically.");
+      return;
+    }
+    const btn = document.getElementById('btnBroadcastPlay');
+    if (broadcaster.isPlaying) {
+      broadcaster.stop();
+      btn.textContent = '▶ Start Visual Broadcast';
+      btn.className = 'btn btn-primary';
+    } else {
+      const fps = Number(document.getElementById('broadcastFps').value) || 30;
+      broadcaster.onProgress = (cur, tot, isParity) => {
+        document.getElementById('broadcastInfo').textContent = `Frame ${cur + 1}/${tot} ${isParity ? '(Cauchy Parity)' : '(Data)'}`;
+      };
+      broadcaster.start(fps);
+      btn.textContent = '⏸ Pause Broadcast';
+      btn.className = 'btn btn-danger';
+    }
+  }
+
+  function updateBroadcastFps(val) {
+    document.getElementById('broadcastFpsLabel').textContent = val;
+    if (broadcaster) broadcaster.setFps(Number(val));
+  }
+
+  function toggleFullscreenBroadcast() {
+    const canvas = document.getElementById('broadcastCanvas');
+    if (!canvas) return;
+    if (!document.fullscreenElement) {
+      canvas.requestFullscreen().catch(() => {});
+    } else {
+      document.exitFullscreen();
+    }
+  }
+
+  // Modal & Download
+  function showModal(res) {
+    document.getElementById('resFilename').textContent = res.filename;
+    document.getElementById('resSize').textContent = `${(res.origSize / 1024).toFixed(1)} KB (${res.origSize.toLocaleString()} bytes)`;
+    document.getElementById('resCompSize').textContent = `${(res.compSize / 1024).toFixed(1)} KB`;
+    document.getElementById('resSpeed').textContent = `${res.speedKbps} KB/s`;
+    document.getElementById('resElapsed').textContent = `${res.elapsedSec}s`;
+    document.getElementById('resSha').textContent = res.sha256;
+
+    const blob = new Blob([res.data], { type: 'application/octet-stream' });
+    const url = URL.createObjectURL(blob);
+    const btn = document.getElementById('btnDownload');
+    btn.href = url;
+    btn.download = res.filename;
+
+    document.getElementById('completeModal').style.display = 'flex';
+  }
+
+  function closeModal() {
+    document.getElementById('completeModal').style.display = 'none';
+  }
+
+  function triggerDownload(res) {
+    const blob = new Blob([res.data], { type: 'application/octet-stream' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = res.filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    logMsg(`[Auto-Download] Saved file '${res.filename}' (${(res.origSize / 1024).toFixed(1)} KB).`);
+  }
+
+  function playSuccessChime() {
+    try {
+      const AudioCtx = window.AudioContext || window.webkitAudioContext;
+      if (!AudioCtx) return;
+      const ctx = new AudioCtx();
+      const notes = [523.25, 659.25, 783.99, 1046.50];
+      notes.forEach((freq, idx) => {
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.type = 'sine';
+        osc.frequency.value = freq;
+        const startTime = ctx.currentTime + idx * 0.12;
+        gain.gain.setValueAtTime(0, startTime);
+        gain.gain.linearRampToValueAtTime(0.2, startTime + 0.02);
+        gain.gain.exponentialRampToValueAtTime(0.001, startTime + 0.5);
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.start(startTime);
+        osc.stop(startTime + 0.55);
+      });
+    } catch(e) {}
+  }
+
+  function escapeHtml(str) {
+    return str.replace(/[&<>'"]/g, tag => ({
+      '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;'
+    }[tag] || tag));
+  }
+
+  // Initial load
+  refreshFilesList();
+</script>
+
+</body>
+</html>

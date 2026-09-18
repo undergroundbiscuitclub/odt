@@ -355,10 +355,15 @@ class ServerV2UnifiedSession:
 
         # Determine target grid candidate:
         # If sending is active, the client is broadcasting the 32x32 ACK grid.
-        # Otherwise, candidate grids are scanned to auto-detect remote optical transmitters.
-        target_grid = 32 if (self.send_session.transfer_active or self.active_mode == "send") else None
+        # Otherwise, lock onto the discovered receive grid size or scan candidate grids.
+        if self.send_session.transfer_active or self.active_mode == "send":
+            target_grid = 32
+            target_mode = "rgb"
+        else:
+            target_grid = self.receive_session.locked_grid_size
+            target_mode = self.receive_session.locked_mode or "rgb"
 
-        res, fiducials, warped = self.tracker.decode_frame(frame, locked_grid_size=target_grid, locked_mode="rgb")
+        res, fiducials, warped = self.tracker.decode_frame(frame, locked_grid_size=target_grid, locked_mode=target_mode)
 
         # Frame routing
         if res is not None:
@@ -536,10 +541,11 @@ SERVER_V2_HTML_PAGE = """<!DOCTYPE html>
     border-radius: 8px; overflow: hidden; border: 1px solid var(--border-color);
     display: flex; align-items: center; justify-content: center;
   }
+  .video-stage.draw-mode { cursor: crosshair; }
   #videoEl { width: 100%; height: 100%; object-fit: contain; display: block; }
   #overlayCanvas {
     position: absolute; top: 0; left: 0; width: 100%; height: 100%;
-    pointer-events: auto; cursor: crosshair;
+    pointer-events: auto;
   }
   .stage-placeholder {
     position: absolute; color: var(--text-dim); font-size: 0.9rem;
@@ -676,12 +682,16 @@ SERVER_V2_HTML_PAGE = """<!DOCTYPE html>
       <div class="video-toolbar">
         <button id="btnShareScreen" class="btn btn-primary" onclick="toggleScreenShare()">📺 Share Screen / Window</button>
         <button id="btnAutoSnap" class="btn" onclick="autoSnapMask()" title="Snap mask tightly to corner chromatic fiducials">🎯 Auto-Snap</button>
+        <label class="auto-snap-label" title="Automatically lock mask to signal when detected" style="display:inline-flex; align-items:center; gap:0.35rem; font-size:0.8rem; color:var(--text-main); cursor:pointer; padding:0 0.3rem;">
+          <input type="checkbox" id="chkAutoSnap" checked>
+          <span>Auto-Lock</span>
+        </label>
         <button id="btnDrawMask" class="btn" onclick="toggleDrawMask()">✏ Draw Mask</button>
         <button id="btnClearMask" class="btn" onclick="clearMask()">🔄 Clear</button>
       </div>
     </div>
 
-    <div class="video-stage">
+    <div id="videoStage" class="video-stage">
       <video id="videoEl" autoplay playsinline muted></video>
       <canvas id="overlayCanvas"></canvas>
       <div id="stagePlaceholder" class="stage-placeholder">
@@ -884,19 +894,84 @@ SERVER_V2_HTML_PAGE = """<!DOCTYPE html>
   // Mask & Drawing state
   let cropRegion = null;
   let isDrawingMask = false;
+  let isDragging = false;
   let dragStart = null;
+  let dragCurrent = null;
   let lastFiducials = null;
   let autoRoi = null;
+  let autoSnapTriggered = false;
+
+  // Flow control & backpressure watchdog
+  let isSending = false;
+  let sendWatchdog = null;
 
   // Telemetry caching
   let knownRecvTotal = 0;
   let lastCompletedFile = "";
 
   const videoEl = document.getElementById('videoEl');
+  const videoStage = document.getElementById('videoStage');
+  const chkAutoSnap = document.getElementById('chkAutoSnap');
   const overlayCanvas = document.getElementById('overlayCanvas');
   const overlayCtx = overlayCanvas.getContext('2d');
   const offscreenCanvas = document.createElement('canvas');
   const offscreenCtx = offscreenCanvas.getContext('2d', { willReadFrequently: true });
+
+  // Geometry transform helper: maps video container to letterboxed video element
+  function getVideoDisplayRect() {
+    const stageW = videoStage ? videoStage.clientWidth : overlayCanvas.width;
+    const stageH = videoStage ? videoStage.clientHeight : overlayCanvas.height;
+    const vw = videoEl.videoWidth;
+    const vh = videoEl.videoHeight;
+    if (!vw || !vh || !stageW || !stageH) return null;
+
+    const stageAspect = stageW / stageH;
+    const videoAspect = vw / vh;
+
+    let dw, dh, dx, dy;
+    if (stageAspect > videoAspect) {
+      // Pillarbox (bars left & right)
+      dh = stageH;
+      dw = stageH * videoAspect;
+      dx = (stageW - dw) / 2;
+      dy = 0;
+    } else {
+      // Letterbox (bars top & bottom)
+      dw = stageW;
+      dh = stageW / videoAspect;
+      dx = 0;
+      dy = (stageH - dh) / 2;
+    }
+    return { dx, dy, dw, dh, videoW: vw, videoH: vh, stageW, stageH };
+  }
+
+  function getPointerVideoCoords(e) {
+    const rect = getVideoDisplayRect();
+    if (!rect) return null;
+    const canvasRect = overlayCanvas.getBoundingClientRect();
+    const pointerX = e.clientX - canvasRect.left;
+    const pointerY = e.clientY - canvasRect.top;
+
+    // Clamped inside the actual displayed video area
+    const clampedX = Math.max(rect.dx, Math.min(rect.dx + rect.dw, pointerX));
+    const clampedY = Math.max(rect.dy, Math.min(rect.dy + rect.dh, pointerY));
+
+    // Convert from display pixels to video native pixels
+    const vx = ((clampedX - rect.dx) / rect.dw) * rect.videoW;
+    const vy = ((clampedY - rect.dy) / rect.dh) * rect.videoH;
+    return { x: vx, y: vy };
+  }
+
+  function updateMaskUI() {
+    if (cropRegion && videoEl.videoWidth > 0) {
+      const totalPixels = videoEl.videoWidth * videoEl.videoHeight;
+      const maskPixels = cropRegion.w * cropRegion.h;
+      const savedPct = Math.max(0, Math.round((1 - (maskPixels / totalPixels)) * 100));
+      document.getElementById('cropStatus').textContent = `Mask: ${Math.round(cropRegion.w)}×${Math.round(cropRegion.h)} px (${savedPct}% saved)`;
+    } else {
+      document.getElementById('cropStatus').textContent = 'Full Video (No Mask)';
+    }
+  }
 
   // 1. WebSocket connection
   function connectWS() {
@@ -911,13 +986,22 @@ SERVER_V2_HTML_PAGE = """<!DOCTYPE html>
       refreshFilesList();
     };
 
+    ws.onerror = () => {
+      isSending = false;
+      clearTimeout(sendWatchdog);
+    };
+
     ws.onclose = () => {
+      isSending = false;
+      clearTimeout(sendWatchdog);
       document.getElementById('wsPill').className = 'pill pill-gray';
       document.getElementById('wsPill').textContent = '○ WS OFFLINE';
       setTimeout(connectWS, 1000);
     };
 
     ws.onmessage = (evt) => {
+      isSending = false;
+      clearTimeout(sendWatchdog);
       if (typeof evt.data === 'string') {
         try {
           const msg = JSON.parse(evt.data);
@@ -949,7 +1033,7 @@ SERVER_V2_HTML_PAGE = """<!DOCTYPE html>
     }
   }
 
-  // 3. Screen Sharing & Frame Pipeline (Unthrottled Web Worker)
+  // 3. Screen Sharing & Frame Pipeline (Unthrottled Web Worker with Ping-Pong Flow Control)
   async function toggleScreenShare() {
     if (activeStream) {
       stopScreenShare();
@@ -981,6 +1065,8 @@ SERVER_V2_HTML_PAGE = """<!DOCTYPE html>
       timerWorker.terminate();
       timerWorker = null;
     }
+    isSending = false;
+    clearTimeout(sendWatchdog);
     videoEl.srcObject = null;
     document.getElementById('stagePlaceholder').style.display = 'block';
     document.getElementById('btnShareScreen').textContent = '📺 Share Screen / Window';
@@ -991,12 +1077,12 @@ SERVER_V2_HTML_PAGE = """<!DOCTYPE html>
   }
 
   function startStreamingLoop() {
-    // Web Worker timer (25ms) prevents tab throttling in background
+    // Web Worker timer (16ms = ~60 FPS) prevents tab throttling in background
     const workerBlob = new Blob([`
       let timer = null;
       onmessage = (e) => {
         if (e.data === 'start') {
-          if (!timer) timer = setInterval(() => postMessage('tick'), 25);
+          if (!timer) timer = setInterval(() => postMessage('tick'), 16);
         } else if (e.data === 'stop') {
           clearInterval(timer);
           timer = null;
@@ -1015,31 +1101,53 @@ SERVER_V2_HTML_PAGE = """<!DOCTYPE html>
 
   function captureAndSendFrame() {
     if (!ws || ws.readyState !== WebSocket.OPEN || !activeStream || videoEl.videoWidth === 0) return;
+    if (isSending) return;
+
+    isSending = true;
+    clearTimeout(sendWatchdog);
+    sendWatchdog = setTimeout(() => { isSending = false; }, 800);
 
     const vw = videoEl.videoWidth;
     const vh = videoEl.videoHeight;
 
-    let sx = 0, sy = 0, sw = vw, sh = vh;
-    if (cropRegion && cropRegion.w > 40 && cropRegion.h > 40) {
-      sx = Math.max(0, Math.min(vw - 10, cropRegion.x));
-      sy = Math.max(0, Math.min(vh - 10, cropRegion.y));
-      sw = Math.min(vw - sx, cropRegion.w);
-      sh = Math.min(vh - sy, cropRegion.h);
-    }
+    try {
+      if (cropRegion && cropRegion.w > 40 && cropRegion.h > 40) {
+        // High-precision cropped transmission capture (1:1 native scale)
+        const cx = Math.max(0, Math.min(vw - 20, cropRegion.x));
+        const cy = Math.max(0, Math.min(vh - 20, cropRegion.y));
+        const cw = Math.max(20, Math.min(vw - cx, cropRegion.w));
+        const ch = Math.max(20, Math.min(vh - cy, cropRegion.h));
 
-    const targetW = 720;
-    const targetH = Math.round(targetW * (sh / sw));
-    if (offscreenCanvas.width !== targetW || offscreenCanvas.height !== targetH) {
-      offscreenCanvas.width = targetW;
-      offscreenCanvas.height = targetH;
-    }
-
-    offscreenCtx.drawImage(videoEl, sx, sy, sw, sh, 0, 0, targetW, targetH);
-    offscreenCanvas.toBlob((blob) => {
-      if (blob && ws && ws.readyState === WebSocket.OPEN) {
-        blob.arrayBuffer().then(buf => ws.send(buf));
+        offscreenCanvas.width = cw;
+        offscreenCanvas.height = ch;
+        offscreenCtx.drawImage(videoEl, cx, cy, cw, ch, 0, 0, cw, ch);
+      } else {
+        // Full video: preserve high resolution up to 1920 to keep corner fiducials sharp
+        const maxDim = Math.max(vw, vh);
+        const scale = maxDim > 1920 ? (1920 / maxDim) : 1;
+        offscreenCanvas.width = Math.round(vw * scale);
+        offscreenCanvas.height = Math.round(vh * scale);
+        offscreenCtx.drawImage(videoEl, 0, 0, offscreenCanvas.width, offscreenCanvas.height);
       }
-    }, 'image/jpeg', 0.85);
+
+      offscreenCanvas.toBlob((blob) => {
+        if (blob && ws && ws.readyState === WebSocket.OPEN) {
+          blob.arrayBuffer().then(buf => {
+            if (ws && ws.readyState === WebSocket.OPEN) {
+              ws.send(buf);
+            } else {
+              isSending = false;
+            }
+          }).catch(() => {
+            isSending = false;
+          });
+        } else {
+          isSending = false;
+        }
+      }, 'image/jpeg', 0.94);
+    } catch(err) {
+      isSending = false;
+    }
 
     // FPS counter
     frameCount++;
@@ -1054,7 +1162,45 @@ SERVER_V2_HTML_PAGE = """<!DOCTYPE html>
 
   // 4. Telemetry Handler
   function handleTelemetry(data) {
-    lastFiducials = data.fiducials;
+    let adjustedFiducials = null;
+    if (data.fiducials && data.fiducials.length === 4) {
+      if (cropRegion && cropRegion.w > 40) {
+        adjustedFiducials = data.fiducials.map(pt => [
+          pt[0] + cropRegion.x,
+          pt[1] + cropRegion.y
+        ]);
+      } else {
+        const scaleX = offscreenCanvas.width > 0 ? (videoEl.videoWidth / offscreenCanvas.width) : 1;
+        const scaleY = offscreenCanvas.height > 0 ? (videoEl.videoHeight / offscreenCanvas.height) : 1;
+        adjustedFiducials = data.fiducials.map(pt => [
+          pt[0] * scaleX,
+          pt[1] * scaleY
+        ]);
+      }
+      lastFiducials = adjustedFiducials;
+
+      // Auto-lock mask if enabled and not already snapped
+      if (chkAutoSnap && chkAutoSnap.checked && !cropRegion && !autoSnapTriggered) {
+        if (data.auto_roi && data.auto_roi.length === 4) {
+          const scaleX = offscreenCanvas.width > 0 ? (videoEl.videoWidth / offscreenCanvas.width) : 1;
+          const scaleY = offscreenCanvas.height > 0 ? (videoEl.videoHeight / offscreenCanvas.height) : 1;
+          const [rx, ry, rw, rh] = data.auto_roi;
+          const cx = Math.max(0, Math.round(rx * scaleX));
+          const cy = Math.max(0, Math.round(ry * scaleY));
+          const cw = Math.min(videoEl.videoWidth - cx, Math.round(rw * scaleX));
+          const ch = Math.min(videoEl.videoHeight - cy, Math.round(rh * scaleY));
+          if (cw > 40 && ch > 40) {
+            cropRegion = { x: cx, y: cy, w: cw, h: ch };
+            autoSnapTriggered = true;
+            updateMaskUI();
+            logMsg(`[Mask] Auto-locked transmission ROI: ${cw}×${ch} px.`);
+          }
+        } else {
+          autoSnapMask();
+        }
+      }
+    }
+
     autoRoi = data.auto_roi;
 
     // Optical pill
@@ -1067,13 +1213,13 @@ SERVER_V2_HTML_PAGE = """<!DOCTYPE html>
       optPill.textContent = '○ OPTICAL SEARCH';
     }
 
-    document.getElementById('fidsStatus').textContent = `Fiducials: ${data.fiducials ? data.fiducials.length : 0}/4`;
+    document.getElementById('fidsStatus').textContent = `Fiducials: ${adjustedFiducials ? adjustedFiducials.length : 0}/4`;
     if (data.received_files_count !== undefined) {
       document.getElementById('filesCountBadge').textContent = data.received_files_count;
     }
 
     // Redraw Canvas Overlay
-    redrawOverlay();
+    redrawOverlay(adjustedFiducials);
 
     // Send Tab Telemetry
     if (data.send) {
@@ -1226,107 +1372,240 @@ SERVER_V2_HTML_PAGE = """<!DOCTYPE html>
   }
 
   // 5. Drawing & Canvas Overlay
-  function redrawOverlay() {
-    const rect = videoEl.getBoundingClientRect();
-    if (overlayCanvas.width !== rect.width || overlayCanvas.height !== rect.height) {
-      overlayCanvas.width = rect.width;
-      overlayCanvas.height = rect.height;
+  function redrawOverlay(fiducials = lastFiducials) {
+    const rect = getVideoDisplayRect();
+    if (!rect) return;
+
+    if (overlayCanvas.width !== rect.stageW || overlayCanvas.height !== rect.stageH) {
+      overlayCanvas.width = rect.stageW;
+      overlayCanvas.height = rect.stageH;
     }
     overlayCtx.clearRect(0, 0, overlayCanvas.width, overlayCanvas.height);
 
-    const vw = videoEl.videoWidth || 1;
-    const vh = videoEl.videoHeight || 1;
-    const scaleX = overlayCanvas.width / vw;
-    const scaleY = overlayCanvas.height / vh;
-
-    // Dim outside cropRegion
+    // 1. Draw Transmission Area Mask (dimming outside region)
     if (cropRegion && cropRegion.w > 20 && cropRegion.h > 20) {
-      const cx = cropRegion.x * scaleX;
-      const cy = cropRegion.y * scaleY;
-      const cw = cropRegion.w * scaleX;
-      const ch = cropRegion.h * scaleY;
+      const dx = rect.dx + (cropRegion.x / rect.videoW) * rect.dw;
+      const dy = rect.dy + (cropRegion.y / rect.videoH) * rect.dh;
+      const dw = (cropRegion.w / rect.videoW) * rect.dw;
+      const dh = (cropRegion.h / rect.videoH) * rect.dh;
 
-      overlayCtx.fillStyle = 'rgba(9, 13, 22, 0.65)';
+      overlayCtx.save();
+      overlayCtx.fillStyle = 'rgba(9, 13, 22, 0.70)';
       overlayCtx.beginPath();
       overlayCtx.rect(0, 0, overlayCanvas.width, overlayCanvas.height);
-      overlayCtx.rect(cx, cy, cw, ch);
+      overlayCtx.rect(dx, dy, dw, dh);
       overlayCtx.fill('evenodd');
 
-      // Outline
+      // Bounding outline
       overlayCtx.strokeStyle = '#06b6d4';
       overlayCtx.lineWidth = 2;
-      overlayCtx.strokeRect(cx, cy, cw, ch);
+      overlayCtx.strokeRect(dx, dy, dw, dh);
+
+      // High-visibility green corner reticle brackets
+      const clen = Math.min(22, dw / 4, dh / 4);
+      overlayCtx.strokeStyle = '#10b981';
+      overlayCtx.lineWidth = 3;
+
+      // TL
+      overlayCtx.beginPath();
+      overlayCtx.moveTo(dx, dy + clen);
+      overlayCtx.lineTo(dx, dy);
+      overlayCtx.lineTo(dx + clen, dy);
+      overlayCtx.stroke();
+      // TR
+      overlayCtx.beginPath();
+      overlayCtx.moveTo(dx + dw - clen, dy);
+      overlayCtx.lineTo(dx + dw, dy);
+      overlayCtx.lineTo(dx + dw, dy + clen);
+      overlayCtx.stroke();
+      // BR
+      overlayCtx.beginPath();
+      overlayCtx.moveTo(dx + dw, dy + dh - clen);
+      overlayCtx.lineTo(dx + dw, dy + dh);
+      overlayCtx.lineTo(dx + dw - clen, dy + dh);
+      overlayCtx.stroke();
+      // BL
+      overlayCtx.beginPath();
+      overlayCtx.moveTo(dx + clen, dy + dh);
+      overlayCtx.lineTo(dx, dy + dh);
+      overlayCtx.lineTo(dx, dy + dh - clen);
+      overlayCtx.stroke();
+
+      // Label above mask
+      overlayCtx.fillStyle = '#06b6d4';
+      overlayCtx.font = 'bold 11px monospace';
+      const tagY = dy - 6 > 14 ? dy - 6 : dy + 16;
+      overlayCtx.fillText(`MASKED TRANSMISSION AREA (${Math.round(cropRegion.w)}×${Math.round(cropRegion.h)})`, dx + 4, tagY);
+
+      overlayCtx.restore();
     }
 
-    // Draw Fiducials
-    if (lastFiducials && lastFiducials.length === 4) {
-      const colors = ['#ef4444', '#10b981', '#a855f7', '#3b82f6']; // TL, TR, BR, BL
-      lastFiducials.forEach((pt, idx) => {
-        let px = pt[0];
-        let py = pt[1];
-        if (cropRegion) {
-          px += cropRegion.x;
-          py += cropRegion.y;
-        }
-        overlayCtx.fillStyle = colors[idx % 4];
+    // 2. Draw active dragging selection box
+    if (isDragging && dragStart && dragCurrent) {
+      const x1 = Math.min(dragStart.x, dragCurrent.x);
+      const y1 = Math.min(dragStart.y, dragCurrent.y);
+      const w = Math.abs(dragCurrent.x - dragStart.x);
+      const h = Math.abs(dragCurrent.y - dragStart.y);
+
+      const dx = rect.dx + (x1 / rect.videoW) * rect.dw;
+      const dy = rect.dy + (y1 / rect.videoH) * rect.dh;
+      const dw = (w / rect.videoW) * rect.dw;
+      const dh = (h / rect.videoH) * rect.dh;
+
+      overlayCtx.save();
+      overlayCtx.strokeStyle = '#38bdf8';
+      overlayCtx.lineWidth = 2;
+      overlayCtx.setLineDash([6, 4]);
+      overlayCtx.fillStyle = 'rgba(56, 189, 248, 0.15)';
+      overlayCtx.fillRect(dx, dy, dw, dh);
+      overlayCtx.strokeRect(dx, dy, dw, dh);
+
+      overlayCtx.setLineDash([]);
+      overlayCtx.fillStyle = '#38bdf8';
+      overlayCtx.font = 'bold 11px monospace';
+      overlayCtx.fillText(`${Math.round(w)} × ${Math.round(h)} px`, dx + 6, dy + 18);
+      overlayCtx.restore();
+    }
+
+    // 3. Draw detected optical fiducials (mapped to display coordinates)
+    if (fiducials && fiducials.length === 4) {
+      const toDisplayPt = (pt) => [
+        rect.dx + (pt[0] / rect.videoW) * rect.dw,
+        rect.dy + (pt[1] / rect.videoH) * rect.dh
+      ];
+
+      const [tl, tr, br, bl] = fiducials.map(toDisplayPt);
+
+      overlayCtx.save();
+      overlayCtx.beginPath();
+      overlayCtx.moveTo(tl[0], tl[1]);
+      overlayCtx.lineTo(tr[0], tr[1]);
+      overlayCtx.lineTo(br[0], br[1]);
+      overlayCtx.lineTo(bl[0], bl[1]);
+      overlayCtx.closePath();
+      overlayCtx.lineWidth = 2.5;
+      overlayCtx.strokeStyle = '#06b6d4';
+      overlayCtx.stroke();
+      overlayCtx.fillStyle = 'rgba(6, 182, 212, 0.08)';
+      overlayCtx.fill();
+
+      const corners = [
+        { pt: tl, col: '#ef4444' }, // TL: Red
+        { pt: tr, col: '#22c55e' }, // TR: Green
+        { pt: bl, col: '#3b82f6' }, // BL: Blue
+        { pt: br, col: '#d946ef' }  // BR: Magenta
+      ];
+      corners.forEach(c => {
         overlayCtx.beginPath();
-        overlayCtx.arc(px * scaleX, py * scaleY, 5, 0, Math.PI * 2);
+        overlayCtx.arc(c.pt[0], c.pt[1], 6, 0, 2 * Math.PI);
+        overlayCtx.fillStyle = c.col;
         overlayCtx.fill();
+        overlayCtx.lineWidth = 2;
+        overlayCtx.strokeStyle = '#ffffff';
+        overlayCtx.stroke();
       });
+      overlayCtx.restore();
     }
   }
 
   function autoSnapMask() {
-    if (autoRoi && autoRoi.length === 4) {
-      cropRegion = { x: autoRoi[0], y: autoRoi[1], w: autoRoi[2], h: autoRoi[3] };
-      document.getElementById('cropStatus').textContent = `Mask: ${Math.round(cropRegion.w)}x${Math.round(cropRegion.h)} px`;
-      logMsg(`[Mask] Auto-snapped tightly around fiducials (${Math.round(cropRegion.w)}x${Math.round(cropRegion.h)}).`);
-    } else {
-      logMsg('[Mask] Fiducials not locked yet. Position the remote window in view first.');
+    if (!lastFiducials || lastFiducials.length !== 4) {
+      logMsg('[Mask] Cannot auto-snap: waiting for optical fiducials to be detected first.');
+      return;
     }
+    const xs = lastFiducials.map(p => p[0]);
+    const ys = lastFiducials.map(p => p[1]);
+    const minX = Math.min(...xs);
+    const maxX = Math.max(...xs);
+    const minY = Math.min(...ys);
+    const maxY = Math.max(...ys);
+
+    const w = maxX - minX;
+    const h = maxY - minY;
+    const padX = w * 0.15;
+    const padY = h * 0.15;
+
+    const cx = Math.max(0, Math.round(minX - padX));
+    const cy = Math.max(0, Math.round(minY - padY));
+    const cw = Math.min(videoEl.videoWidth - cx, Math.round(w + padX * 2));
+    const ch = Math.min(videoEl.videoHeight - cy, Math.round(h + padY * 2));
+
+    cropRegion = { x: cx, y: cy, w: cw, h: ch };
+    autoSnapTriggered = true;
+    updateMaskUI();
+    logMsg(`[Mask] Auto-snapped mask around fiducials: ${cw}×${ch} px.`);
+    redrawOverlay();
   }
 
   function clearMask() {
     cropRegion = null;
-    document.getElementById('cropStatus').textContent = 'Full Video (No Mask)';
+    autoSnapTriggered = false;
+    updateMaskUI();
     logMsg('[Mask] Mask cleared. Processing full frame.');
+    redrawOverlay();
   }
 
   function toggleDrawMask() {
     isDrawingMask = !isDrawingMask;
-    overlayCanvas.style.cursor = isDrawingMask ? 'crosshair' : 'default';
-    document.getElementById('btnDrawMask').style.borderColor = isDrawingMask ? 'var(--accent-cyan)' : '#334155';
+    const btn = document.getElementById('btnDrawMask');
+    if (isDrawingMask) {
+      btn.style.borderColor = 'var(--accent-cyan)';
+      btn.style.color = 'var(--accent-cyan)';
+      videoStage.classList.add('draw-mode');
+      overlayCanvas.style.cursor = 'crosshair';
+      logMsg('[Mask] Click and drag on video to draw transmission mask.');
+    } else {
+      btn.style.borderColor = '#334155';
+      btn.style.color = '#fff';
+      videoStage.classList.remove('draw-mode');
+      overlayCanvas.style.cursor = 'default';
+    }
   }
 
-  overlayCanvas.addEventListener('mousedown', (e) => {
-    if (!isDrawingMask) return;
-    const r = overlayCanvas.getBoundingClientRect();
-    dragStart = { x: e.clientX - r.left, y: e.clientY - r.top };
+  overlayCanvas.addEventListener('pointerdown', (e) => {
+    if (!activeStream || videoEl.videoWidth === 0) return;
+    const pt = getPointerVideoCoords(e);
+    if (!pt) return;
+
+    isDragging = true;
+    dragStart = pt;
+    dragCurrent = pt;
+    overlayCanvas.setPointerCapture(e.pointerId);
   });
 
-  overlayCanvas.addEventListener('mouseup', (e) => {
-    if (!isDrawingMask || !dragStart) return;
-    const r = overlayCanvas.getBoundingClientRect();
-    const endX = e.clientX - r.left;
-    const endY = e.clientY - r.top;
+  window.addEventListener('pointermove', (e) => {
+    if (!isDragging) return;
+    const pt = getPointerVideoCoords(e);
+    if (!pt) return;
+    dragCurrent = pt;
+    redrawOverlay();
+  });
 
-    const vw = videoEl.videoWidth;
-    const vh = videoEl.videoHeight;
-    const scaleX = vw / overlayCanvas.width;
-    const scaleY = vh / overlayCanvas.height;
+  window.addEventListener('pointerup', (e) => {
+    if (!isDragging) return;
+    isDragging = false;
+    const pt = getPointerVideoCoords(e) || dragCurrent;
 
-    const x = Math.min(dragStart.x, endX) * scaleX;
-    const y = Math.min(dragStart.y, endY) * scaleY;
-    const w = Math.abs(endX - dragStart.x) * scaleX;
-    const h = Math.abs(endY - dragStart.y) * scaleY;
+    const x1 = Math.min(dragStart.x, pt.x);
+    const y1 = Math.min(dragStart.y, pt.y);
+    const x2 = Math.max(dragStart.x, pt.x);
+    const y2 = Math.max(dragStart.y, pt.y);
+    const w = x2 - x1;
+    const h = y2 - y1;
 
     if (w > 40 && h > 40) {
-      cropRegion = { x, y, w, h };
-      document.getElementById('cropStatus').textContent = `Mask: ${Math.round(w)}x${Math.round(h)} px`;
-      logMsg(`[Mask] Set manual mask: ${Math.round(w)}x${Math.round(h)} px.`);
+      cropRegion = { x: Math.round(x1), y: Math.round(y1), w: Math.round(w), h: Math.round(h) };
+      autoSnapTriggered = true;
+      updateMaskUI();
+      logMsg(`[Mask] Transmission mask applied: ${cropRegion.w}×${cropRegion.h} px.`);
+    }
+
+    if (isDrawingMask) {
+      toggleDrawMask();
     }
     dragStart = null;
-    toggleDrawMask();
+    dragCurrent = null;
+    redrawOverlay();
   });
 
   // 6. Keyboard Access & File Staging

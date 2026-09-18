@@ -12,3 +12,6 @@ test_tmp/
 
 # Automated test suite
 tests/
+debug_sample_v2.png
+test_sample.txt
+testfile.10m
