@@ -1835,7 +1835,6 @@
     const file = files[0];
     document.getElementById('stagedFileDesc').textContent = `Staging '${file.name}' (${(file.size / 1024).toFixed(1)} KB)...`;
     logSendMsg(`Staging file '${file.name}'...`);
-    updateClientCommand(file.name);
 
     // 1. Stage in backend typer (server_v2 session)
     const formData = new FormData();
@@ -1882,65 +1881,13 @@
   // =========================================================================
   // BASE32 KEYBOARD SENDING & CLIENT BOOTSTRAPPING
   // =========================================================================
-  let clientCmdMode = 'base32';
-  let currentStagedFilename = 'client.py';
-
-  function setClientCmdMode(mode) {
-    clientCmdMode = mode;
-    ['btnCmdModeB32', 'btnCmdModeCli', 'btnCmdModePy'].forEach(id => {
-      const b = document.getElementById(id);
-      if (b) b.classList.remove('active');
-    });
-    if (mode === 'base32') document.getElementById('btnCmdModeB32')?.classList.add('active');
-    else if (mode === 'client') document.getElementById('btnCmdModeCli')?.classList.add('active');
-    else if (mode === 'python') document.getElementById('btnCmdModePy')?.classList.add('active');
-    updateClientCommand(currentStagedFilename);
-  }
-
-  function updateClientCommand(filename) {
-    currentStagedFilename = filename || "client.py";
-    const el = document.getElementById('base32ClientCmd');
-    if (!el) return;
-    if (clientCmdMode === 'python') {
-      el.textContent = `python3 -c "import base64,sys; open('${currentStagedFilename}','wb').write(base64.b32decode(sys.stdin.read().strip()))"`;
-    } else if (clientCmdMode === 'client') {
-      el.textContent = `python3 client.py --b32 ${currentStagedFilename}`;
-    } else {
-      el.textContent = `base32 -d > ${currentStagedFilename}`;
-    }
-  }
-
-  function copyClientCommand() {
-    const el = document.getElementById('base32ClientCmd');
-    if (!el) return;
-    const text = el.textContent.trim();
-    if (navigator.clipboard && navigator.clipboard.writeText) {
-      navigator.clipboard.writeText(text).then(() => {
-        const btn = document.getElementById('btnCopyCmd');
-        if (btn) {
-          const orig = btn.textContent;
-          btn.textContent = '✓ Copied!';
-          btn.style.color = '#34d399';
-          setTimeout(() => { btn.textContent = orig; btn.style.color = ''; }, 2000);
-        }
-        logSendMsg(`Copied client command: "${text}"`);
-      }).catch(() => {
-        prompt("Copy client command manually:", text);
-      });
-    } else {
-      prompt("Copy client command manually:", text);
-    }
-  }
-
   async function stageClientPy() {
     logSendMsg("Staging 'client.py' from server...");
     try {
       const resp = await fetch('/api/stage_client', { method: 'POST' });
       const data = await resp.json();
       if (data.status === 'ok') {
-        currentStagedFilename = "client.py";
         document.getElementById('stagedFileDesc').textContent = `Staged: client.py (${(data.size / 1024).toFixed(1)} KB)`;
-        updateClientCommand("client.py");
         logSendMsg(`'client.py' staged successfully (${(data.size / 1024).toFixed(1)} KB). Ready to send via Base32 or optical link.`);
         if (data.send) updateSendTelemetry(data.send);
 
@@ -1997,7 +1944,7 @@
       b32Banner.className = 'status-banner banner-wait';
       document.getElementById('base32Spinner').textContent = '⏳';
       document.getElementById('base32StatusText').textContent = `Starting countdown (${cdVal}s)...`;
-      document.getElementById('base32DetailText').textContent = `Click inside your client terminal running: ${document.getElementById('base32ClientCmd')?.textContent.trim() || ''}`;
+      document.getElementById('base32DetailText').textContent = 'Click inside your client terminal/window now!';
     }
 
     try {
@@ -2147,7 +2094,6 @@
       if (data.status === 'ok') {
         logSendMsg(`File '${filename}' staged from library.`);
         switchTab('send');
-        updateClientCommand(filename);
         if (data.send) updateSendTelemetry(data.send);
       }
     } catch (e) {}
