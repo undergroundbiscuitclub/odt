@@ -1186,9 +1186,30 @@ if __name__ == "__main__":
                         help="Directory to save received files when in receive mode (default: ./received)")
     parser.add_argument("--tty", action="store_true",
                         help="Force headless terminal ANSI mode instead of Tkinter GUI")
+    parser.add_argument("--b32", "--decode-base32", type=str, default=None, metavar="OUTFILE",
+                        help="Decode continuous Base32 keystrokes from stdin directly into OUTFILE")
     args = parser.parse_args()
 
-    if args.send:
+    if args.b32:
+        import base64
+        outfile = args.b32
+        print(f"[Client] Reading Base32 stream from stdin -> writing to '{outfile}'...")
+        raw_text = sys.stdin.read()
+        cleaned = "".join(raw_text.split())
+        if not cleaned:
+            print("[Client Error] No Base32 input received.")
+            sys.exit(1)
+        padding_needed = (8 - len(cleaned) % 8) % 8
+        cleaned += "=" * padding_needed
+        try:
+            data = base64.b32decode(cleaned.encode("ascii"), casefold=True)
+            with open(outfile, "wb") as f:
+                f.write(data)
+            print(f"[Client] Successfully wrote {len(data)} bytes to '{outfile}'!")
+        except Exception as e:
+            print(f"[Client Error] Failed to decode Base32: {e}")
+            sys.exit(1)
+    elif args.send:
         # Determine delay
         if args.fps and args.fps > 0:
             delay = max(1, 1000 // args.fps)

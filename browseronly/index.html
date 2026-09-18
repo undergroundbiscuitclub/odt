@@ -211,6 +211,7 @@
       transition: all 0.15s ease;
     }
     .btn:hover { background: #334155; }
+    .btn.active { background: var(--accent-cyan); border-color: var(--accent-cyan); color: #090d16; font-weight: 700; }
     .btn-primary {
       background: var(--accent-cyan);
       border-color: var(--accent-cyan);
@@ -601,6 +602,7 @@
       <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.5rem;">
         <h3 style="font-size: 0.95rem;">📤 Transmit File to Remote Client</h3>
         <div style="display: flex; gap: 0.4rem; align-items: center;">
+          <button class="btn" id="btnSendClientPy" style="background: linear-gradient(135deg, #059669, #10b981); color: white; border: none; font-weight: 700; padding: 0.25rem 0.75rem; font-size: 0.75rem; box-shadow: 0 1px 3px rgba(0,0,0,0.3);" onclick="sendClientPyAction()" title="Stage and send browseronly/client.py to remote machine">📦 Send client.py</button>
           <button class="btn" id="btnRequestKeyboard" style="padding: 0.25rem 0.6rem; font-size: 0.75rem;" onclick="requestKeyboardAccess()">🔑 Keyboard Access</button>
           <button class="btn" id="btnToggleBroadcast" style="padding: 0.25rem 0.6rem; font-size: 0.75rem;" onclick="toggleSendMode()">📺 Screen Broadcast</button>
         </div>
@@ -612,8 +614,55 @@
         <div class="dropzone" id="dropzone" onclick="document.getElementById('fileInput').click()">
           <input type="file" id="fileInput" style="display:none;" onchange="handleFileSelect(this.files)">
           <div style="font-size: 1.5rem; margin-bottom: 0.4rem;">📄</div>
-          <div class="dropzone-text">Drag & drop any file here, or <span class="dropzone-browse">browse</span></div>
+          <div class="dropzone-text">Drag & drop any file here, or <span class="dropzone-browse">browse</span> — or <a href="javascript:void(0)" onclick="event.stopPropagation(); stageClientPy();" style="color: #34d399; font-weight: 700; text-decoration: underline;">stage client.py</a></div>
           <div id="stagedFileDesc" style="font-size: 0.78rem; color: #38bdf8; margin-top: 0.4rem; font-weight: 600;">No file staged</div>
+        </div>
+
+        <!-- Continuous Base32 Keyboard Transfer Card (Zero Optical Setup) -->
+        <div class="base32-card" id="base32Card" style="background: rgba(15, 23, 42, 0.75); border: 1px solid rgba(6, 182, 212, 0.35); border-radius: 8px; padding: 0.85rem; display: flex; flex-direction: column; gap: 0.65rem; transition: all 0.25s ease;">
+          <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.5rem;">
+            <div style="display: flex; align-items: center; gap: 0.5rem;">
+              <span style="font-weight: 700; font-size: 0.88rem; color: #38bdf8; display: flex; align-items: center; gap: 0.4rem;">
+                ⌨️ Continuous Base32 Keyboard Transfer
+              </span>
+              <span class="badge-pure" style="background: rgba(16, 185, 129, 0.15); color: #34d399; border-color: rgba(16, 185, 129, 0.3);">
+                No Optical Link Needed
+              </span>
+            </div>
+            <div style="display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap;">
+              <label style="font-size: 0.75rem; color: var(--text-dim); display: flex; align-items: center; gap: 0.3rem;" title="Seconds before typing begins to let you focus the remote window">
+                <span>Countdown:</span>
+                <select id="base32CountdownSelect" style="background: #1e293b; color: #fff; border: 1px solid #334155; border-radius: 4px; padding: 0.2rem 0.4rem; font-size: 0.75rem; cursor: pointer;">
+                  <option value="3">3 sec</option>
+                  <option value="5" selected>5 sec</option>
+                  <option value="8">8 sec</option>
+                  <option value="10">10 sec</option>
+                </select>
+              </label>
+              <button class="btn btn-primary" id="btnStartBase32" onclick="triggerBase32Send()" style="font-size: 0.8rem; padding: 0.35rem 0.85rem; background: linear-gradient(135deg, #0284c7, #06b6d4); color: white; border: none; font-weight: 700; box-shadow: 0 1px 4px rgba(6,182,212,0.3);">
+                ⌨️ Send as Base32
+              </button>
+            </div>
+          </div>
+
+          <div style="font-size: 0.76rem; color: var(--text-dim); line-height: 1.45;">
+            Sends the staged file via RFC 4648 Base32 as a continuous keyboard string directly into the remote terminal or text console.
+            Works completely independently of screen sharing or optical camera feedback.
+          </div>
+
+          <!-- Base32 Live Status & Countdown Banner (hidden when idle) -->
+          <div id="base32Banner" class="status-banner banner-wait" style="display: none; align-items: center; justify-content: space-between; gap: 0.5rem; flex-wrap: wrap;">
+            <div style="display: flex; align-items: center; gap: 0.6rem;">
+              <div id="base32Spinner" style="font-size: 1.1rem;">⏳</div>
+              <div>
+                <div id="base32StatusText" style="font-weight: 700; font-size: 0.82rem;">Preparing Base32 transmission...</div>
+                <div id="base32DetailText" style="font-size: 0.74rem; color: var(--text-dim);">Focus target client window/terminal now!</div>
+              </div>
+            </div>
+            <div style="display: flex; gap: 0.4rem; align-items: center;">
+              <button class="btn btn-danger" id="btnAbortBase32" onclick="emergencyStop()" style="font-size: 0.75rem; padding: 0.25rem 0.6rem;">🛑 Abort</button>
+            </div>
+          </div>
         </div>
 
         <!-- Speed Presets -->
@@ -1386,15 +1435,60 @@
 
   function updateSendTelemetry(send) {
     if (!send) return;
-    if (send.client_state) {
-      document.getElementById('statSendState').textContent = send.client_state.replace('_', ' ');
+
+    const b32Banner = document.getElementById('base32Banner');
+    if (send.base32_active) {
+      if (b32Banner) {
+        b32Banner.style.display = 'flex';
+        if (send.base32_countdown > 0) {
+          b32Banner.className = 'status-banner banner-wait';
+          document.getElementById('base32Spinner').textContent = '⏳';
+          document.getElementById('base32StatusText').textContent = `Focus Target Window! Typing starts in ${send.base32_countdown}s...`;
+          document.getElementById('base32DetailText').textContent = 'Focus target client terminal/window before countdown expires.';
+          document.getElementById('statSendState').textContent = `WAIT (${send.base32_countdown}s)`;
+        } else {
+          b32Banner.className = 'status-banner banner-active';
+          document.getElementById('base32Spinner').textContent = '⌨️';
+          document.getElementById('base32StatusText').textContent = `Typing Base32: ${send.base32_chars_sent.toLocaleString()} / ${send.base32_chars_total.toLocaleString()} chars (${send.base32_progress_pct}%)`;
+          document.getElementById('base32DetailText').textContent = `Speed: ${send.base32_speed_cps} chars/s | Continuous keyboard string`;
+          document.getElementById('statSendState').textContent = 'TYPING B32';
+          document.getElementById('statSendSpeed').textContent = `${send.base32_speed_cps} c/s`;
+        }
+      }
+      document.getElementById('sendProgressLabel').textContent = `Base32: ${send.base32_progress_pct}% (${send.base32_chars_sent.toLocaleString()} / ${send.base32_chars_total.toLocaleString()})`;
+      document.getElementById('sendSpeedLabel').textContent = `${send.base32_speed_cps} chars/s`;
+      document.getElementById('sendProgressFill').style.width = `${send.base32_progress_pct}%`;
+    } else if (send.base32_complete) {
+      if (b32Banner) {
+        b32Banner.style.display = 'flex';
+        b32Banner.className = 'status-banner banner-success';
+        document.getElementById('base32Spinner').textContent = '✅';
+        document.getElementById('base32StatusText').textContent = 'Base32 Transmission 100% Complete!';
+        document.getElementById('base32DetailText').textContent = `All ${send.base32_chars_total.toLocaleString()} characters sent. Base32 decode on client to finalize file.`;
+      }
+      document.getElementById('sendProgressLabel').textContent = 'Base32: 100% (Complete)';
+      document.getElementById('sendProgressFill').style.width = '100%';
+      document.getElementById('statSendState').textContent = 'B32 COMPLETE';
+    } else if (send.base32_error) {
+      if (b32Banner) {
+        b32Banner.style.display = 'flex';
+        b32Banner.className = 'status-banner banner-error';
+        document.getElementById('base32Spinner').textContent = '🛑';
+        document.getElementById('base32StatusText').textContent = 'Base32 Transmission Stopped';
+        document.getElementById('base32DetailText').textContent = send.base32_error;
+      }
+      document.getElementById('statSendState').textContent = 'B32 STOPPED';
+    } else {
+      if (send.client_state) {
+        document.getElementById('statSendState').textContent = send.client_state.replace('_', ' ');
+      }
+      document.getElementById('statSendChunks').textContent = `${send.chunks_acked} / ${send.total_chunks}`;
+      document.getElementById('statSendSpeed').textContent = (send.speed_bps / 1024).toFixed(1);
+      document.getElementById('statSendRetries').textContent = send.retransmissions;
+      document.getElementById('sendProgressLabel').textContent = `Progress: ${send.progress_pct}%`;
+      document.getElementById('sendSpeedLabel').textContent = `${(send.speed_bps / 1024).toFixed(1)} KB/s`;
+      document.getElementById('sendProgressFill').style.width = `${send.progress_pct}%`;
     }
-    document.getElementById('statSendChunks').textContent = `${send.chunks_acked} / ${send.total_chunks}`;
-    document.getElementById('statSendSpeed').textContent = (send.speed_bps / 1024).toFixed(1);
-    document.getElementById('statSendRetries').textContent = send.retransmissions;
-    document.getElementById('sendProgressLabel').textContent = `Progress: ${send.progress_pct}%`;
-    document.getElementById('sendSpeedLabel').textContent = `${(send.speed_bps / 1024).toFixed(1)} KB/s`;
-    document.getElementById('sendProgressFill').style.width = `${send.progress_pct}%`;
 
     if (send.filename) {
       document.getElementById('stagedFileDesc').textContent = `Staged: ${send.filename} (${send.total_chunks} chunks)`;
@@ -1741,6 +1835,7 @@
     const file = files[0];
     document.getElementById('stagedFileDesc').textContent = `Staging '${file.name}' (${(file.size / 1024).toFixed(1)} KB)...`;
     logSendMsg(`Staging file '${file.name}'...`);
+    updateClientCommand(file.name);
 
     // 1. Stage in backend typer (server_v2 session)
     const formData = new FormData();
@@ -1783,6 +1878,150 @@
     dropzone.classList.remove('dragover');
     handleFileSelect(e.dataTransfer.files);
   });
+
+  // =========================================================================
+  // BASE32 KEYBOARD SENDING & CLIENT BOOTSTRAPPING
+  // =========================================================================
+  let clientCmdMode = 'base32';
+  let currentStagedFilename = 'client.py';
+
+  function setClientCmdMode(mode) {
+    clientCmdMode = mode;
+    ['btnCmdModeB32', 'btnCmdModeCli', 'btnCmdModePy'].forEach(id => {
+      const b = document.getElementById(id);
+      if (b) b.classList.remove('active');
+    });
+    if (mode === 'base32') document.getElementById('btnCmdModeB32')?.classList.add('active');
+    else if (mode === 'client') document.getElementById('btnCmdModeCli')?.classList.add('active');
+    else if (mode === 'python') document.getElementById('btnCmdModePy')?.classList.add('active');
+    updateClientCommand(currentStagedFilename);
+  }
+
+  function updateClientCommand(filename) {
+    currentStagedFilename = filename || "client.py";
+    const el = document.getElementById('base32ClientCmd');
+    if (!el) return;
+    if (clientCmdMode === 'python') {
+      el.textContent = `python3 -c "import base64,sys; open('${currentStagedFilename}','wb').write(base64.b32decode(sys.stdin.read().strip()))"`;
+    } else if (clientCmdMode === 'client') {
+      el.textContent = `python3 client.py --b32 ${currentStagedFilename}`;
+    } else {
+      el.textContent = `base32 -d > ${currentStagedFilename}`;
+    }
+  }
+
+  function copyClientCommand() {
+    const el = document.getElementById('base32ClientCmd');
+    if (!el) return;
+    const text = el.textContent.trim();
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(() => {
+        const btn = document.getElementById('btnCopyCmd');
+        if (btn) {
+          const orig = btn.textContent;
+          btn.textContent = '✓ Copied!';
+          btn.style.color = '#34d399';
+          setTimeout(() => { btn.textContent = orig; btn.style.color = ''; }, 2000);
+        }
+        logSendMsg(`Copied client command: "${text}"`);
+      }).catch(() => {
+        prompt("Copy client command manually:", text);
+      });
+    } else {
+      prompt("Copy client command manually:", text);
+    }
+  }
+
+  async function stageClientPy() {
+    logSendMsg("Staging 'client.py' from server...");
+    try {
+      const resp = await fetch('/api/stage_client', { method: 'POST' });
+      const data = await resp.json();
+      if (data.status === 'ok') {
+        currentStagedFilename = "client.py";
+        document.getElementById('stagedFileDesc').textContent = `Staged: client.py (${(data.size / 1024).toFixed(1)} KB)`;
+        updateClientCommand("client.py");
+        logSendMsg(`'client.py' staged successfully (${(data.size / 1024).toFixed(1)} KB). Ready to send via Base32 or optical link.`);
+        if (data.send) updateSendTelemetry(data.send);
+
+        // Also stage in optical broadcaster for visual transmission
+        if (data.data_b64) {
+          try {
+            const rawBytes = Uint8Array.from(atob(data.data_b64), c => c.charCodeAt(0));
+            if (!broadcaster) {
+              const bCanvas = document.getElementById('broadcastCanvas');
+              broadcaster = new OTDEncoder.BrowserOpticalBroadcaster(bCanvas);
+            }
+            await broadcaster.stageFile("client.py", rawBytes, 64, 15);
+            document.getElementById('broadcastInfo').textContent = `Staged: client.py (${broadcaster.frames.length} visual frames)`;
+          } catch (e) {}
+        }
+      } else {
+        logSendMsg(`Error staging client.py: ${data.message}`);
+      }
+    } catch (e) {
+      logSendMsg(`Failed to stage client.py: ${e.message}`);
+    }
+  }
+
+  async function sendClientPyAction() {
+    switchTab('send');
+    if (sendSubMode !== 'typer') toggleSendMode();
+    await stageClientPy();
+    const card = document.getElementById('base32Card');
+    if (card) {
+      card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      card.style.borderColor = 'var(--accent-cyan)';
+      card.style.boxShadow = '0 0 15px rgba(6, 182, 212, 0.4)';
+      setTimeout(() => {
+        card.style.borderColor = 'rgba(6, 182, 212, 0.35)';
+        card.style.boxShadow = 'none';
+      }, 2000);
+    }
+  }
+
+  async function triggerBase32Send() {
+    const cdVal = parseInt(document.getElementById('base32CountdownSelect')?.value || "5", 10);
+    const stagedText = document.getElementById('stagedFileDesc')?.textContent || '';
+    if (!stagedText || stagedText.includes('No file staged')) {
+      if (confirm("No file is currently staged. Would you like to stage and send 'client.py'?")) {
+        await stageClientPy();
+      } else {
+        return;
+      }
+    }
+
+    const b32Banner = document.getElementById('base32Banner');
+    if (b32Banner) {
+      b32Banner.style.display = 'flex';
+      b32Banner.className = 'status-banner banner-wait';
+      document.getElementById('base32Spinner').textContent = '⏳';
+      document.getElementById('base32StatusText').textContent = `Starting countdown (${cdVal}s)...`;
+      document.getElementById('base32DetailText').textContent = `Click inside your client terminal running: ${document.getElementById('base32ClientCmd')?.textContent.trim() || ''}`;
+    }
+
+    try {
+      const resp = await fetch('/api/send_base32', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ countdown: cdVal, trailing_newline: true })
+      });
+      const data = await resp.json();
+      if (data.status === 'ok') {
+        logSendMsg(`Base32 transmission scheduled (${cdVal}s countdown). Focus remote client terminal now!`);
+        if (data.send) updateSendTelemetry(data.send);
+      } else {
+        logSendMsg(`Base32 error: ${data.message}`);
+        if (b32Banner) {
+          b32Banner.className = 'status-banner banner-error';
+          document.getElementById('base32StatusText').textContent = 'Failed to start';
+          document.getElementById('base32DetailText').textContent = data.message;
+        }
+      }
+    } catch (e) {
+      logSendMsg(`Base32 request failed: ${e.message}`);
+    }
+  }
 
   async function setSpeed(preset) {
     document.querySelectorAll('.preset-btn').forEach(b => b.classList.remove('active'));
@@ -1908,6 +2147,7 @@
       if (data.status === 'ok') {
         logSendMsg(`File '${filename}' staged from library.`);
         switchTab('send');
+        updateClientCommand(filename);
         if (data.send) updateSendTelemetry(data.send);
       }
     } catch (e) {}

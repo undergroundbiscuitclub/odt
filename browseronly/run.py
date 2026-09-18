@@ -15,6 +15,7 @@ import json
 import os
 import socketserver
 import sys
+import threading
 import time
 import urllib.parse
 import webbrowser
@@ -42,7 +43,172 @@ class BrowserDuplexSession(ServerDuplexSessionV2):
     - Adaptive chunk timeouts based on packet length and keyboard speed preset
     - Resilient optical link dead-man's switch timeout (3.5s)
     - Heartbeat-aware transmission loop preventing premature aborts on large files
+    - Continuous Base32 keyboard transmission for zero-optical bootstrapping and raw file transfer
     """
+    def __init__(self, chunk_size=256, char_delay=0.0002):
+        super().__init__(chunk_size=chunk_size, char_delay=char_delay)
+        self.base32_active = False
+        self.base32_countdown = 0
+        self.base32_chars_sent = 0
+        self.base32_chars_total = 0
+        self.base32_start_time = 0
+        self.base32_complete = False
+        self.base32_error = None
+
+    def send_chat(self, text):
+        return self.send_chat_message(text)
+
+    def stage_file(self, filename, raw_bytes):
+        with self.lock:
+            self.base32_active = False
+            self.base32_complete = False
+            self.base32_error = None
+            self.base32_countdown = 0
+            self.base32_chars_sent = 0
+            self.base32_chars_total = 0
+        return super().stage_file(filename, raw_bytes)
+
+    def start_base32_transmission(self, countdown=5, trailing_newline=True):
+        with self.lock:
+            if self.transfer_active or self.base32_active:
+                return False, "Another transmission is already in progress."
+            if not self.staged_file or "raw_bytes" not in self.staged_file:
+                return False, "No file is currently staged. Please stage a file first."
+
+            self.base32_active = True
+            self.base32_complete = False
+            self.base32_error = None
+            self.base32_countdown = countdown
+            self.base32_chars_sent = 0
+            self.abort_requested = False
+
+        t = threading.Thread(target=self._base32_worker_loop, args=(countdown, trailing_newline), daemon=True)
+        t.start()
+        return True, f"Base32 transmission scheduled (starting in {countdown}s)."
+
+    def _base32_worker_loop(self, countdown, trailing_newline):
+        with self.lock:
+            if not self.staged_file or "raw_bytes" not in self.staged_file:
+                self.base32_active = False
+                return
+            raw_bytes = self.staged_file["raw_bytes"]
+            filename = self.staged_file["filename"]
+
+        import base64
+        b32_str = base64.b32encode(raw_bytes).decode("ascii")
+        tot_chars = len(b32_str)
+
+        with self.lock:
+            self.base32_chars_total = tot_chars
+            self.base32_chars_sent = 0
+
+        self.log(f"[Base32] Prepared '{filename}' ({len(raw_bytes)} bytes -> {tot_chars} Base32 chars).")
+
+        # Countdown phase: gives user time to switch focus to client terminal / window
+        for c in range(countdown, 0, -1):
+            with self.lock:
+                if self.abort_requested or not self.base32_active:
+                    self.base32_active = False
+                    self.log("[Base32] Cancelled during countdown.")
+                    return
+                self.base32_countdown = c
+            self.log(f"[Base32] Typing in {c}s... Focus the target client terminal/window!")
+            time.sleep(1.0)
+
+        with self.lock:
+            if self.abort_requested or not self.base32_active:
+                self.base32_active = False
+                self.log("[Base32] Cancelled before typing.")
+                return
+            self.base32_countdown = 0
+            self.base32_start_time = time.time()
+
+        self.log(f"[Base32] Starting continuous keyboard typing of '{filename}' ({tot_chars} chars)...")
+
+        try:
+            chunk_size = 128
+            for i in range(0, tot_chars, chunk_size):
+                with self.lock:
+                    if self.abort_requested or not self.base32_active:
+                        break
+
+                slice_str = b32_str[i:i + chunk_size]
+                ok = self.typer.type_string(
+                    slice_str,
+                    delay=self.char_delay,
+                    cancel_check=lambda: self.abort_requested or not self.base32_active
+                )
+                if not ok or self.abort_requested or not self.base32_active:
+                    break
+
+                with self.lock:
+                    self.base32_chars_sent = min(tot_chars, i + len(slice_str))
+
+            if self.abort_requested or not self.base32_active:
+                with self.lock:
+                    self.base32_active = False
+                    self.base32_error = "Transmission aborted by user."
+                self.typer.release_all_keys()
+                self.log(f"[Base32] Transmission halted ({self.base32_chars_sent}/{tot_chars} chars sent).")
+                return
+
+            if trailing_newline:
+                self.typer.type_string("\n")
+
+            with self.lock:
+                self.base32_active = False
+                self.base32_complete = True
+                self.base32_chars_sent = tot_chars
+
+            self.typer.release_all_keys()
+            elapsed = max(0.01, time.time() - self.base32_start_time)
+            rate = tot_chars / elapsed
+            self.log(f"[Base32] Finished typing '{filename}': {tot_chars} chars in {elapsed:.1f}s ({rate:.0f} chars/s)!")
+
+        except Exception as e:
+            with self.lock:
+                self.base32_active = False
+                self.base32_error = str(e)
+            self.typer.release_all_keys()
+            self.log(f"[Base32 Error] {e}")
+
+    def abort_transmission(self, reason="Manual or safety stop"):
+        with self.lock:
+            was_b32 = self.base32_active
+            self.base32_active = False
+            self.base32_countdown = 0
+            if was_b32:
+                self.base32_error = reason
+        super().abort_transmission(reason=reason)
+
+    def get_telemetry_dict(self):
+        d = super().get_telemetry_dict()
+        with self.lock:
+            b32_progress = 0.0
+            if self.base32_chars_total > 0:
+                b32_progress = min(100.0, (self.base32_chars_sent / self.base32_chars_total) * 100.0)
+
+            b32_speed = 0.0
+            if self.base32_active and self.base32_start_time > 0:
+                dt = time.time() - self.base32_start_time
+                if dt > 0.2:
+                    b32_speed = self.base32_chars_sent / dt
+            elif self.base32_complete and self.base32_start_time > 0 and self.base32_chars_total > 0:
+                dt = max(0.01, (self.end_time if hasattr(self, 'end_time') and self.end_time else time.time()) - self.base32_start_time)
+                b32_speed = self.base32_chars_total / dt
+
+            d.update({
+                "base32_active": self.base32_active,
+                "base32_countdown": self.base32_countdown,
+                "base32_chars_sent": self.base32_chars_sent,
+                "base32_chars_total": self.base32_chars_total,
+                "base32_progress_pct": round(b32_progress, 1),
+                "base32_speed_cps": round(b32_speed, 1),
+                "base32_complete": self.base32_complete,
+                "base32_error": self.base32_error,
+            })
+        return d
+
     def is_link_alive(self, timeout=3.5):
         with self.lock:
             if not self.transfer_active or self.abort_requested:
@@ -57,7 +223,7 @@ class BrowserDuplexSession(ServerDuplexSessionV2):
 
     def _transmission_worker_loop(self):
         with self.lock:
-            if not self.staged_file or self.transfer_active or self.transfer_complete:
+            if not self.staged_file or self.transfer_active or self.transfer_complete or self.base32_active:
                 return
             self.transfer_active = True
             self.abort_requested = False
@@ -310,6 +476,49 @@ class DuplexServerHandler(http.server.SimpleHTTPRequestHandler):
                 "message": msg,
                 "send": session.get_telemetry_dict()
             })
+
+        elif path == "/api/stage_client":
+            client_path = os.path.join(DIR, "client.py")
+            if not os.path.isfile(client_path):
+                client_path = os.path.join(PARENT_DIR, "client.py")
+            if not os.path.isfile(client_path):
+                self.send_json_response(404, {"status": "error", "message": "client.py not found on server"})
+                return
+            try:
+                with open(client_path, "rb") as f:
+                    raw_bytes = f.read()
+                ok, msg = session.stage_file("client.py", raw_bytes)
+                self.send_json_response(200 if ok else 400, {
+                    "status": "ok" if ok else "error",
+                    "message": msg,
+                    "filename": "client.py",
+                    "size": len(raw_bytes),
+                    "data_b64": base64.b64encode(raw_bytes).decode("ascii"),
+                    "send": session.get_telemetry_dict()
+                })
+            except Exception as e:
+                self.send_json_response(500, {"status": "error", "message": str(e)})
+
+        elif path == "/api/send_base32":
+            try:
+                data = json.loads(body.decode("utf-8")) if body else {}
+                if data.get("stage_client") and not session.staged_file:
+                    client_path = os.path.join(DIR, "client.py")
+                    if not os.path.isfile(client_path):
+                        client_path = os.path.join(PARENT_DIR, "client.py")
+                    if os.path.isfile(client_path):
+                        with open(client_path, "rb") as f:
+                            session.stage_file("client.py", f.read())
+                countdown = int(data.get("countdown", 5))
+                trailing_newline = bool(data.get("trailing_newline", True))
+                ok, msg = session.start_base32_transmission(countdown=countdown, trailing_newline=trailing_newline)
+                self.send_json_response(200 if ok else 400, {
+                    "status": "ok" if ok else "error",
+                    "message": msg,
+                    "send": session.get_telemetry_dict()
+                })
+            except Exception as e:
+                self.send_json_response(400, {"status": "error", "message": str(e)})
 
         elif path == "/api/stage_received":
             try:

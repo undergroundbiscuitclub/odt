@@ -149,6 +149,12 @@ class KeyboardTyper:
                 elif ch == " ":
                     ks = self.XK.string_to_keysym("space")
                     needs_shift = False
+                elif ch == "=":
+                    ks = self.XK.string_to_keysym("equal")
+                    needs_shift = False
+                elif ch == "\t":
+                    ks = self.XK.string_to_keysym("Tab")
+                    needs_shift = False
                 else:
                     ks = self.XK.string_to_keysym(ch)
                     needs_shift = ch.isupper()
