@@ -74,6 +74,90 @@ STATE_LABELS = {
 
 
 # ==============================================================================
+# CAUCHY REED-SOLOMON FORWARD ERROR CORRECTION (GF(2^8))
+# ==============================================================================
+
+_GF_EXP, _GF_LOG = [0] * 512, [0] * 256
+_x = 1
+for _i in range(255):
+    _GF_EXP[_i] = _x
+    _GF_EXP[_i + 255] = _x
+    _GF_LOG[_x] = _i
+    _x <<= 1
+    if _x & 0x100:
+        _x ^= 0x11d
+_GF_LOG[0] = 511
+
+def _gf_mul(a, b):
+    return 0 if a == 0 or b == 0 else _GF_EXP[_GF_LOG[a] + _GF_LOG[b]]
+
+def _gf_inv(a):
+    return _GF_EXP[255 - _GF_LOG[a]]
+
+def _cauchy_coeff(r, c):
+    return _gf_inv((255 - r) ^ c)
+
+def generate_fec_parities(chunks, M):
+    """Generates M Cauchy Reed-Solomon parity chunks over Galois Field GF(2^8)."""
+    K, max_len = len(chunks), max(len(c) for c in chunks)
+    parities = []
+    for r in range(M):
+        p = bytearray(max_len)
+        for c in range(K):
+            coeff = _cauchy_coeff(r, c)
+            d = chunks[c].ljust(max_len, b"\x00")
+            for i in range(max_len):
+                if d[i]:
+                    p[i] ^= _gf_mul(coeff, d[i])
+        parities.append(bytes(p))
+    return parities
+
+def pack_file_to_frames(filepath, gs=48, fec_pct=15):
+    """
+    Packs a file into structured Q2 optical frames with Cauchy RS FEC and QSMD metadata.
+    100% compatible with browseronly/decoder.js and decoder_v2.py.
+    """
+    with open(filepath, "rb") as f:
+        raw = f.read()
+
+    comp = zlib.compress(raw, 9)
+    bn = os.path.basename(filepath).encode("utf-8")
+    meta = struct.pack(">4sQQ32sH", b"QSMD", len(raw), len(comp), hashlib.sha256(raw).digest(), len(bn)) + bn
+    stream = meta + comp
+
+    bpf = (gs * gs * 3) // 8
+    cap = bpf - 16  # 16-byte Q2 header
+    chunks = [stream[i:i + cap] for i in range(0, len(stream), cap)]
+    data_len = len(chunks)
+    all_chunks = list(chunks)
+
+    if fec_pct > 0 and data_len > 0:
+        m_count = max(2, int(round(data_len * (fec_pct / 100.0))))
+        m_count = min(m_count, max(0, 255 - data_len))
+        if m_count > 0:
+            all_chunks.extend(generate_fec_parities(chunks, m_count))
+
+    tot = len(all_chunks)
+    frames = []
+    tot_cells = gs * gs
+
+    for idx, c in enumerate(all_chunks):
+        is_parity = idx >= data_len
+        crc = zlib.crc32(c) & 0xffffffff
+        flags = (1 if idx == 0 else 0) | (2 if is_parity else 0)
+        hdr = struct.pack(">2sBBBBHHHI", b"Q2", 2, 3, gs, flags, idx, data_len, len(c), crc)
+        raw_frame = (hdr + c).ljust(bpf, b"\x00")
+
+        bits = "".join(format(b, "08b") for b in raw_frame)
+        vals = [int(bits[i:i + 3], 2) for i in range(0, len(bits) - 2, 3)]
+        if len(vals) < tot_cells:
+            vals.extend([0] * (tot_cells - len(vals)))
+        frames.append(vals[:tot_cells])
+
+    return frames, tot, len(raw), len(comp), data_len
+
+
+# ==============================================================================
 # PURE PYTHON OPTICAL FRAME ENCODING (With Extended Heartbeat / Poll)
 # ==============================================================================
 
@@ -836,6 +920,210 @@ def run_tty(client):
         print("\nClient stopped.")
 
 
+def run_gui_sender(frames, tot, delay_ms, fname, gs=48, data_len=None):
+    """Displays the optical transmission frames in an interactive Tkinter GUI window."""
+    if data_len is None: data_len = tot
+    import tkinter as tk
+    init_dim = 650
+
+    root = tk.Tk()
+    root.title(f"OTD Optical Transmitter | {fname}")
+    root.configure(bg="#000000")
+    root.resizable(True, True)
+    root.minsize(200, 200)
+
+    # Top Status Bar
+    lbl = tk.Label(root, text="BROADCASTING - Press Space to Pause | 'f' Fullscreen",
+                   fg="#38bdf8", bg="#0d1117", font=("Monospace", 9, "bold"), pady=6)
+    lbl.pack(side="top", fill="x")
+
+    canvas = tk.Canvas(root, width=init_dim, height=init_dim, bg="black", highlightthickness=0)
+    canvas.pack(side="top", fill="both", expand=True)
+
+    state = {
+        "idx": 0,
+        "run": True,
+        "loop": 1,
+        "photo": None,
+        "w": init_dim,
+        "h": init_dim,
+        "fullscreen": False
+    }
+    img_id = canvas.create_image(0, 0, anchor="nw")
+
+    def render():
+        cw = max(50, state["w"])
+        ch = max(50, state["h"])
+        ppm_data = make_ppm_image(frames[state["idx"]], cw, ch, gs=gs, pulse_state=state["idx"])
+        state["photo"] = tk.PhotoImage(data=ppm_data)
+        canvas.itemconfig(img_id, image=state["photo"])
+        canvas.coords(img_id, 0, 0)
+
+        is_parity = state["idx"] >= data_len
+        tag = f"Parity {state['idx'] - data_len + 1}/{tot - data_len}" if is_parity else f"Data {state['idx'] + 1}/{data_len}"
+        pct = min(100.0, ((state["idx"] + 1) / data_len) * 100.0) if data_len > 0 else 100.0
+        fps_est = 1000.0 / max(1, delay_ms)
+        st_text = "BROADCASTING" if state["run"] else "PAUSED"
+        color = "#10b981" if state["run"] else "#f59e0b"
+        lbl.config(
+            text=f"[{st_text}] {fname} | {tag} ({pct:.1f}%) | Loop #{state['loop']} | {fps_est:.0f} FPS | Space: Toggle | 'f': Fullscreen",
+            fg=color
+        )
+
+    def on_resize(event):
+        if event.width > 30 and event.height > 30:
+            if event.width != state["w"] or event.height != state["h"]:
+                state["w"] = event.width
+                state["h"] = event.height
+                render()
+
+    canvas.bind("<Configure>", on_resize)
+
+    def toggle(event=None):
+        state["run"] = not state["run"]
+        render()
+
+    def step_next(event=None):
+        state["idx"] = (state["idx"] + 1) % tot
+        render()
+
+    def step_prev(event=None):
+        state["idx"] = (state["idx"] - 1 + tot) % tot
+        render()
+
+    def toggle_fullscreen(event=None):
+        state["fullscreen"] = not state["fullscreen"]
+        root.attributes("-fullscreen", state["fullscreen"])
+
+    root.bind("<space>", toggle)
+    root.bind("<Return>", toggle)
+    root.bind("<Button-1>", toggle)
+    root.bind("n", step_next)
+    root.bind("N", step_next)
+    root.bind("<Right>", step_next)
+    root.bind("p", step_prev)
+    root.bind("P", step_prev)
+    root.bind("<Left>", step_prev)
+    root.bind("f", toggle_fullscreen)
+    root.bind("F", toggle_fullscreen)
+    root.bind("q", lambda e: root.destroy())
+    root.bind("Q", lambda e: root.destroy())
+    root.bind("<Escape>", lambda e: root.destroy())
+
+    def tick():
+        if state["run"]:
+            state["idx"] = (state["idx"] + 1) % tot
+            if state["idx"] == 0:
+                state["loop"] += 1
+            render()
+        root.after(delay_ms, tick)
+
+    render()
+    root.after(delay_ms, tick)
+    root.mainloop()
+
+
+def run_tty_sender(frames, tot, delay_ms, fname, gs=48, data_len=None):
+    """Runs the optical transmitter in headless terminal mode with 24-bit ANSI color."""
+    if data_len is None: data_len = tot
+    fd, old_attr = None, None
+    try:
+        import termios, tty
+        fd = sys.stdin.fileno()
+        old_attr = termios.tcgetattr(fd)
+        tty.setcbreak(fd)
+    except Exception:
+        pass
+
+    sys.stdout.write("\033[?1049h\033[?25l\033[2J")
+    sys.stdout.flush()
+    state = {"idx": 0, "run": True, "loop": 1}
+    last_t = 0
+
+    def get_ch():
+        try:
+            import select
+            if select.select([sys.stdin], [], [], 0)[0]:
+                return sys.stdin.read(1)
+        except Exception:
+            pass
+        return None
+
+    try:
+        while True:
+            k = get_ch()
+            if k in ("q", "Q", "\x03", "\x1b"):
+                break
+            elif k in (" ", "\n", "\r"):
+                state["run"] = not state["run"]
+            elif k in ("n", "N", ">"):
+                state["idx"] = (state["idx"] + 1) % tot
+            elif k in ("p", "P", "<"):
+                state["idx"] = (state["idx"] - 1 + tot) % tot
+
+            now = time.time()
+            if (now - last_t) * 1000.0 >= delay_ms or last_t == 0 or not state["run"]:
+                pct = min(100.0, ((state["idx"] + 1) / data_len) * 100.0)
+                is_parity = state["idx"] >= data_len
+                tag = f"Parity {state['idx'] - data_len + 1:2d}/{tot - data_len}" if is_parity else f"Frame {state['idx'] + 1:3d}/{data_len:3d}"
+                st = "BROADCASTING" if state["run"] else "PAUSED"
+                fps = 1000.0 / max(1, delay_ms)
+                status = f"\033[1;33m[{st}] {fname} | {tag} ({pct:5.1f}%) | Loop #{state['loop']} | {fps:.0f} FPS | Space: Toggle | q: Quit\033[0m\n"
+                grid_art, _ = render_tty_grid(frames[state["idx"]], gs=gs, pulse_state=state["idx"])
+                sys.stdout.write(grid_art + status)
+                sys.stdout.flush()
+                last_t = now
+
+                if state["run"]:
+                    state["idx"] = (state["idx"] + 1) % tot
+                    if state["idx"] == 0:
+                        state["loop"] += 1
+            time.sleep(0.005)
+    finally:
+        sys.stdout.write("\033[?25h\033[?1049l\033[0m")
+        sys.stdout.flush()
+        if fd is not None and old_attr is not None:
+            import termios
+            termios.tcsetattr(fd, termios.TCSADRAIN, old_attr)
+        print("\nOptical Transmitter stopped.")
+
+
+def run_send(filepath, grid_size=48, delay_ms=60, fec_pct=15, force_tty=False):
+    """Encodes a file and optically broadcasts it onto screen (GUI or TTY)."""
+    if not os.path.exists(filepath):
+        print(f"Error: File '{filepath}' not found.")
+        sys.exit(1)
+
+    print("=" * 68)
+    print("   OTD OPTICAL TRANSMITTER / SENDER (STANDALONE)")
+    print("   Zero external dependencies (Python 3 standard library only)")
+    print("=" * 68)
+    frames, tot, osize, csize, data_len = pack_file_to_frames(filepath, gs=grid_size, fec_pct=fec_pct)
+    parity_count = tot - data_len
+    fec_str = f" (+{parity_count} Cauchy FEC parity)" if parity_count > 0 else ""
+    fps = 1000.0 / max(1, delay_ms)
+    fname = os.path.basename(filepath)
+
+    print(f"File:       {fname}")
+    print(f"Size:       {osize:,} bytes (compressed to {csize:,} bytes)")
+    print(f"Frames:     {tot} total{fec_str}")
+    print(f"Grid:       {grid_size}×{grid_size} (RGB 8-color mode, 3 bits/cell)")
+    print(f"Speed:      {delay_ms} ms/frame (~{fps:.1f} FPS)")
+    print("=" * 68)
+    print("Point the camera or screen share from browseronly/index.html at this window!\n")
+
+    if force_tty:
+        run_tty_sender(frames, tot, delay_ms, fname, gs=grid_size, data_len=data_len)
+        return
+
+    try:
+        import tkinter
+        run_gui_sender(frames, tot, delay_ms, fname, gs=grid_size, data_len=data_len)
+    except Exception as e:
+        print(f"Note: Tkinter GUI not available ({e}). Falling back to ANSI terminal mode (--tty)...\n")
+        run_tty_sender(frames, tot, delay_ms, fname, gs=grid_size, data_len=data_len)
+
+
 def run_client(output_dir="./received", grid_size=32, force_tty=False):
     client = ClientReceiver(output_dir=output_dir, grid_size=grid_size)
 
@@ -849,7 +1137,7 @@ def run_client(output_dir="./received", grid_size=32, force_tty=False):
     print("  • Robust multi-packet parser prevents dropped chunks on fast typing.")
     print("=" * 68)
     print("Instructions:")
-    print("  1. In browseronly/index.html, click 'Share Screen/Window'.")
+    print("  1. In browseronly/index.html, click 'Share Screen' or 'Use Camera'.")
     print("  2. Focus this window and press [ENTER] or [SPACE].")
     print("  3. The optical grid will confirm focus and begin receiving!")
     print("=" * 68)
@@ -870,13 +1158,47 @@ def run_client(output_dir="./received", grid_size=32, force_tty=False):
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="OTD Duplex Client with Active Optical Heartbeat")
+    parser = argparse.ArgumentParser(
+        description="OTD Standalone Duplex Client: Optical Receiver & Transmitter",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""Examples:
+  # Default Receiver Mode (read keystrokes & show optical ACK grid):
+  python3 browseronly/client.py
+
+  # Transmit / Send Mode (optically broadcast a file to camera or screen share):
+  python3 browseronly/client.py --send /path/to/file.txt --delay 60 --grid 48
+
+  # Headless ANSI terminal transmitter:
+  python3 browseronly/client.py --send /path/to/file.txt --tty --fps 20
+"""
+    )
+    parser.add_argument("-s", "--send", type=str, default=None, metavar="FILE",
+                        help="Transmit a file optically (Optical Sender / Broadcast Mode)")
+    parser.add_argument("-d", "--delay", type=int, default=None,
+                        help="Frame delay in milliseconds for optical transmission (default: 60ms)")
+    parser.add_argument("--fps", type=int, default=None,
+                        help="Playback framerate in frames per second (e.g. 20, 30; overrides --delay)")
+    parser.add_argument("-g", "--grid", type=int, default=None, choices=[32, 48, 64, 80, 96],
+                        help="Optical grid dimension (default: 48 for --send, 32 for receive)")
+    parser.add_argument("-f", "--fec", type=int, default=15,
+                        help="Cauchy Reed-Solomon FEC parity percentage (default: 15)")
     parser.add_argument("-o", "--output-dir", default="./received",
-                        help="Directory to save received files (default: ./received)")
-    parser.add_argument("-g", "--grid", type=int, default=32, choices=[32, 48, 64],
-                        help="Optical feedback grid dimension (default: 32)")
+                        help="Directory to save received files when in receive mode (default: ./received)")
     parser.add_argument("--tty", action="store_true",
                         help="Force headless terminal ANSI mode instead of Tkinter GUI")
     args = parser.parse_args()
 
-    run_client(output_dir=args.output_dir, grid_size=args.grid, force_tty=args.tty)
+    if args.send:
+        # Determine delay
+        if args.fps and args.fps > 0:
+            delay = max(1, 1000 // args.fps)
+        elif args.delay and args.delay > 0:
+            delay = args.delay
+        else:
+            delay = 60  # Default ~16.6 FPS
+
+        gs = args.grid if args.grid else 48
+        run_send(args.send, grid_size=gs, delay_ms=delay, fec_pct=args.fec, force_tty=args.tty)
+    else:
+        gs = args.grid if args.grid else 32
+        run_client(output_dir=args.output_dir, grid_size=gs, force_tty=args.tty)
